@@ -59,8 +59,8 @@ $rowRange = [$tileTopLeft[1],$tileBottomRight[1]];
 
 $style = "normal";
 //$style = "bdparcellaire";
-$layer = "strava";
-//$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS";
+//$layer = "strava";
+$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS";
 //$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD";
 //$layer = "ORTHOIMAGERY.ORTHOPHOTOS";
 //$layer = "CADASTRALPARCELS.PARCELS";
@@ -68,8 +68,8 @@ $ext = "jpeg";
 //$format = "image/png";
 $format = "image/".$ext;
 
-//$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
-$url = 'https://b.tiles.mapbox.com/v4/strava.1f5pzaor/{zoom}/{col}/{row}.png?access_token=pk.eyJ1Ijoic3RyYXZhIiwiYSI6IlpoeXU2U0UifQ.c7yhlZevNRFCqHYm6G6Cyg';
+$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
+//$url = 'https://b.tiles.mapbox.com/v4/strava.1f5pzaor/{zoom}/{col}/{row}.png?access_token=pk.eyJ1Ijoic3RyYXZhIiwiYSI6IlpoeXU2U0UifQ.c7yhlZevNRFCqHYm6G6Cyg';
 
 set_error_handler(function($code, $string, $file, $line){
     throw new ErrorException($string, null, $code, $file, $line);
