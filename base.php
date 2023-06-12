@@ -38,13 +38,15 @@ function tileCoordFromLatLon($lat,$lon){
 */
 
 $tile_size = [256,256];
+$tile_size = [512,512];
 $zoom = 16;
+$zoom = 15;
 
-$latTopLeft = '45.004618' ;
-$lonTopLeft = '6.112639' ;
+$latTopLeft = '45.39' ;
+$lonTopLeft = '5.71' ;
 
-$latBottomRight = '44.985126' ;
-$lonBottomRight = '6.129339' ;
+$latBottomRight = '45.31' ;
+$lonBottomRight = '5.83' ;
 
 $tileTopLeft = tileCoordFromLatLon($latTopLeft,$lonTopLeft);
 $tileBottomRight = tileCoordFromLatLon($latBottomRight,$lonBottomRight);
@@ -59,17 +61,32 @@ $rowRange = [$tileTopLeft[1],$tileBottomRight[1]];
 
 $style = "normal";
 //$style = "bdparcellaire";
-//$layer = "strava";
-$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS";
+$layer = "strava";
+//$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS";
 //$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD";
 //$layer = "ORTHOIMAGERY.ORTHOPHOTOS";
 //$layer = "CADASTRALPARCELS.PARCELS";
-$ext = "jpeg";
+//$layer = "OPEN_STREET_MAP";
+//$ext = "jpeg";
+$ext = "png";
 //$format = "image/png";
 $format = "image/".$ext;
 
-$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
-//$url = 'https://b.tiles.mapbox.com/v4/strava.1f5pzaor/{zoom}/{col}/{row}.png?access_token=pk.eyJ1Ijoic3RyYXZhIiwiYSI6IlpoeXU2U0UifQ.c7yhlZevNRFCqHYm6G6Cyg';
+//$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
+//$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/proxy/'.       '?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
+
+$cloudfront = [ 'CloudFront-Key-Pair-Id' => 'APKAIDPUN4QMG7VUQPSA',
+    'CloudFront-Policy' => 'eyJTdGF0ZW1lbnQiOiBbeyJSZXNvdXJjZSI6Imh0dHBzOi8vaGVhdG1hcC1leHRlcm5hbC0qLnN0cmF2YS5jb20vKiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTY4NzQzMTA2OX0sIkRhdGVHcmVhdGVyVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNjg2MjA3MDY5fX19XX0_',
+    'CloudFront-Signature' => 'X61Oq7RNewXTKnchwDOf8fAnSbt-XR~B8ptrsETkK~1qfONEcDZdW4kflyS-nI43bA16Op4k8uyRz33~byT0sjY5x6aZ0K2vGWgUCcmhO7TZghr-7BI8BHwwc54TZjpBa2kiKdXs6Z9kMTFdTbs6rY0r8leMFHRrdayIxLyHlWcN39qzNh1ZSmpakTWBecCI73cRaVbGIbdqNeWcBv3WS-dJ-wsGIWR329hlfccw~28iWdHWaX6Q1vi4q2PMGDEDL~Zsqmu9-TPlAhGZm6N7OCb7DAADpPNsQ623az8G2Kj6tlcBRZsKdk3Aa4~PE0i93zn-qV6EwugQm76WSamrPg__'
+];
+$cookies = array();
+foreach ($cloudfront as $key => $value)
+{
+    $cookies[] = $key . '=' . $value;
+}
+$cookies = implode('; ',$cookies);
+$url = 'https://heatmap-external-a.strava.com/tiles-auth/run/blue/{zoom}/{col}/{row}.png?v=19';
+//https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/13/4226/2935.vector.pbf?sku=101VRqaoOf11D&access_token=pk.eyJ1Ijoic3RyYXZhIiwiYSI6IlpoeXU2U0UifQ.c7yhlZevNRFCqHYm6G6Cyg
 
 set_error_handler(function($code, $string, $file, $line){
     throw new ErrorException($string, null, $code, $file, $line);
@@ -87,19 +104,32 @@ register_shutdown_function(function(){
 
 
 
-function saveImg($imagename,$url){
+function saveImg($imagename,$url,$cookies = ''){
+//    echo $url;
+//    echo "\n";
+//    echo $cookies;
 	$ch = curl_init($url);
 	$fp = fopen($imagename, 'wb');
+    //curl_setopt($ch, CURLOPT_VERBOSE, 1);
+    curl_setopt( $ch, CURLOPT_COOKIE, $cookies );
 	curl_setopt($ch, CURLOPT_FILE, $fp);
 	curl_setopt($ch, CURLOPT_HEADER, 0);
 	curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.12) Gecko/20101026 Firefox/3.6.12');
 	curl_exec($ch);
-	curl_close($ch);
-	fclose($fp);
+    if (curl_errno($ch)) {
+        $error_msg = curl_error($ch);
+    }
+    curl_close($ch);
+    fclose($fp);
+
+    if (isset($error_msg)) {
+        echo $error_msg;
+        die();
+    }
 }
 
 function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
-	global $url,$style,$zoom,$layer,$format,$ext,$tile_size;
+	global $url,$style,$zoom,$layer,$format,$ext,$tile_size,$cookies;
 	$tile_url = $url;
 	$tile_url = str_replace('{style}', $style, $tile_url);
 	$tile_url = str_replace('{zoom}', $zoom, $tile_url);
@@ -122,14 +152,37 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
 			$tile_name = 'tile/t-'.$layer.'-'.$row.'-'.$col.'-'.$zoom.'.'.$ext;
 			echo $i++.'/'.$nboftiles;
 			if (!file_exists($tile_name)){
-				saveImg($tile_name,$current_tile_url);
+				saveImg($tile_name,$current_tile_url,$cookies);
 			}else{
 				echo " -- from cache";
 			}
 			if ($format == "image/png")
-				$src = imagecreatefrompng($tile_name);
-			else if ($format == "image/jpeg")
-				$src = imagecreatefromjpeg($tile_name);
+                try {
+				    $src = imagecreatefrompng($tile_name);
+                } catch (Exception $e){
+                    echo "error = ".$e->getMessage();echo "\n";
+                    echo "$tile_name";
+                    if (strpos($e->getMessage(),'is not a valid PNG file')>0){
+                        echo "\n";
+                        echo "unlink & download again ...\n";
+                        unlink($tile_name);
+                        saveImg($tile_name,$current_tile_url,$cookies);
+                        $src = imagecreatefrompng($tile_name);
+                    }else{
+                        echo "\n";
+                        die();
+                    }
+                }
+			else if ($format == "image/jpeg"){
+                try {
+                    $src = imagecreatefromjpeg($tile_name);
+                } catch (Exception $e){
+                    echo "error = ".$e->getMessage();echo "\n";
+                    echo "$tile_name";
+                    echo "\n";
+                    die();
+                }
+            }
 			
 			if ($src){
 				imagecopy($im, $src, ($col-$colmin)*$tile_size[0] , ($row-$rowmin)*$tile_size[1] , 0 , 0 , $tile_size[0],$tile_size[1] );
