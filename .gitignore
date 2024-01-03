@@ -2,3 +2,5 @@
 *.png
 *.xcf
 tile/*
+config.json
+settings/*.json
