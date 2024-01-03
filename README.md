@@ -1,20 +1,26 @@
 # dl-map
 A php tool to generate a map (as a png file) from online tiles
 
-## instructions 
-set top left corner and bottom right corner position (use geoportail right clic for exemple)
+## Configuration
 
+set your config data in config.json file, using [config.json.dist](config.json.dist) as an exemple.
+
+TIPS: you can use [geoportail](https://www.geoportail.gouv.fr/) right click to find GPX coordinates 
+
+you should write your own settings using examples.
+
+## Run with php
+
+You need php on you computer, with gd
+
+```bash
+php base.php
 ```
-$latTopLeft = '45.004618' ;
-$lonTopLeft = '6.112639' ;
 
-$latBottomRight = '44.985126' ;
-$lonBottomRight = '6.129339' ;
-```
+## Run with docker 
 
-chose your layer and ajust.  
+You need docker and docker compose on your computer.
 
-Run : 
-```
-$ php base.php
+```bash
+docker compose up
 ```
