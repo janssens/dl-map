@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map with Rectangular Selection</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body{
+            background: #f0f0f0;
+            padding: 1rem;
+            font-family: monospace;
+        }
+        #map {
+            height: 400px;
+        }
+    </style>
+</head>
+<body>
+<h2>Use this page to generate your conf.json file</h2>
+<h3>Chose your area using the map</h3>
+<div id="map"></div>
+<br>
+<label for="map">
+    Chose a type of map
+</label>
+<select name="map" id="layer">
+    <option value="strava">stravaheatmap</option>
+    <option value="ign-top25">ign top25</option>
+    <option value="ign-scan-express">ign scan-express</option>
+</select>
+<br>
+<br>
+<h3>results</h3>
+<textarea name="json" id="json" cols="30" rows="10">
+
+</textarea>
+<p>save this as your conf.json file</p>
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+    var map = L.map('map').setView([48.8566, 2.3522], 15); // Coordonnées pour centrer la carte (Paris, France)
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    var drawnRect = null;
+    var firstCorner = null;
+    var secondCorner = null;
+    var bounds = [];
+
+    map.on('click', function(e) {
+        if (drawnRect) {
+            map.removeLayer(drawnRect);
+            map.removeLayer(firstCorner);
+            map.removeLayer(secondCorner);
+            bounds = [];
+            drawnRect = null;
+            firstCorner = null;
+            secondCorner = null;
+        }
+
+        bounds.push(e.latlng);
+        console.log(bounds);
+
+        if (bounds.length === 2){
+            let lBounds = L.latLngBounds(bounds[0],bounds[1]);
+            console.log(lBounds);
+            drawnRect = L.rectangle(bounds, {color: '#00ff78', weight: 1}).addTo(map);
+            map.removeLayer(firstCorner);
+            firstCorner = null;
+            firstCorner = L.marker(lBounds.getNorthWest()).addTo(map);
+            secondCorner = L.marker(lBounds.getSouthEast()).addTo(map);
+            writeConf(lBounds);
+        }
+
+        if (bounds.length === 1)
+            firstCorner = L.marker(bounds[0]).addTo(map);
+    });
+
+    function writeConf(lBounds){
+        data = {
+            "latTopLeft": lBounds.getNorthWest().lat,
+            "lngTopLeft": lBounds.getNorthWest().lng ,
+            "latBottomRight" : lBounds.getSouthEast().lat ,
+            "lngBottomRight" : lBounds.getSouthEast().lng ,
+            "settings" : document.querySelector("#layer").value
+        }
+        document.querySelector("#json").value = JSON.stringify(data);
+    }
+
+    document.querySelector("#layer").addEventListener('change',function (e){
+        if (bounds.length === 2) {
+            let lBounds = L.latLngBounds(bounds[0], bounds[1]);
+            writeConf(lBounds);
+        }
+    });
+
+</script>
+</body>
+</html>
