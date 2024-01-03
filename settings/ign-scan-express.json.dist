@@ -1,0 +1,8 @@
+{
+  "layer" : "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD",
+  "url" : "https://wxs.ign.fr/xx--KEY--xx/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}",
+  "file_ext": "jpeg",
+  "tile_size" : [256,256],
+  "zoom" : 16,
+  "style" : "normal"
+}

@@ -1,0 +1,12 @@
+{
+  "layer" : "strava",
+  "cookies" : {
+    "CloudFront-Key-Pair-Id" : "",
+    "CloudFront-Policy" : "",
+    "CloudFront-Signature" : ""
+  },
+  "url" : "https://heatmap-external-a.strava.com/tiles-auth/run/blue/{zoom}/{col}/{row}.png?v=19",
+  "file_ext": "png",
+  "tile_size" : [512,512],
+  "zoom" : 15
+}
