@@ -1,10 +1,12 @@
 <?php
 
+const SUCCESS = 0;
+const OVERFLOW = 1;
 function tileCoordFromLatLon($lat,$lon){
-	global $zoom;
-	$xtile = floor((($lon + 180) / 360) * pow(2, $zoom));
-	$ytile = floor((1 - log(tan(deg2rad($lat)) + 1 / cos(deg2rad($lat))) / pi()) /2 * pow(2, $zoom));
-	return array($xtile,$ytile);
+    global $zoom;
+    $xtile = floor((($lon + 180) / 360) * pow(2, $zoom));
+    $ytile = floor((1 - log(tan(deg2rad($lat)) + 1 / cos(deg2rad($lat))) / pi()) /2 * pow(2, $zoom));
+    return array($xtile,$ytile);
 }
 
 //ini_set('display_errors', false);
@@ -37,59 +39,75 @@ function tileCoordFromLatLon($lat,$lon){
 +--------+---------+------------------+------------+----------------+------------------+
 */
 
-$tile_size = [256,256];
-$tile_size = [512,512];
-$zoom = 16;
-$zoom = 15;
-
-$latTopLeft = '45.39' ;
-$lonTopLeft = '5.71' ;
-
-$latBottomRight = '45.31' ;
-$lonBottomRight = '5.83' ;
-
-$tileTopLeft = tileCoordFromLatLon($latTopLeft,$lonTopLeft);
-$tileBottomRight = tileCoordFromLatLon($latBottomRight,$lonBottomRight);
-
-echo "top left :";
-print_r($tileTopLeft);
-echo "bottom right :";
-print_r($tileBottomRight);
-
-$colRange = [$tileTopLeft[0],$tileBottomRight[0]];
-$rowRange = [$tileTopLeft[1],$tileBottomRight[1]];
-
-$style = "normal";
-//$style = "bdparcellaire";
-$layer = "strava";
-//$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS";
-//$layer = "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD";
-//$layer = "ORTHOIMAGERY.ORTHOPHOTOS";
-//$layer = "CADASTRALPARCELS.PARCELS";
-//$layer = "OPEN_STREET_MAP";
-//$ext = "jpeg";
-$ext = "png";
-//$format = "image/png";
-$format = "image/".$ext;
-
-//$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
-//$url = 'https://wxs.ign.fr/an7nvfzojv5wa96dsga5nk8w/proxy/'.       '?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}';
-
-$cloudfront = [ 'CloudFront-Key-Pair-Id' => 'APKAIDPUN4QMG7VUQPSA',
-    'CloudFront-Policy' => 'eyJTdGF0ZW1lbnQiOiBbeyJSZXNvdXJjZSI6Imh0dHBzOi8vaGVhdG1hcC1leHRlcm5hbC0qLnN0cmF2YS5jb20vKiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTY4NzQzMTA2OX0sIkRhdGVHcmVhdGVyVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNjg2MjA3MDY5fX19XX0_',
-    'CloudFront-Signature' => 'X61Oq7RNewXTKnchwDOf8fAnSbt-XR~B8ptrsETkK~1qfONEcDZdW4kflyS-nI43bA16Op4k8uyRz33~byT0sjY5x6aZ0K2vGWgUCcmhO7TZghr-7BI8BHwwc54TZjpBa2kiKdXs6Z9kMTFdTbs6rY0r8leMFHRrdayIxLyHlWcN39qzNh1ZSmpakTWBecCI73cRaVbGIbdqNeWcBv3WS-dJ-wsGIWR329hlfccw~28iWdHWaX6Q1vi4q2PMGDEDL~Zsqmu9-TPlAhGZm6N7OCb7DAADpPNsQ623az8G2Kj6tlcBRZsKdk3Aa4~PE0i93zn-qV6EwugQm76WSamrPg__'
+$toRead = [
+    "latTopLeft" => null,
+    "lngTopLeft"=> null,
+    "latBottomRight"=> null,
+    "lngBottomRight"=> null,
+    "settings"=> null
 ];
-$cookies = array();
-foreach ($cloudfront as $key => $value)
-{
-    $cookies[] = $key . '=' . $value;
+
+// Read the contents of the JSON file
+$jsonData = file_get_contents('config.json');
+// Decode the JSON data into a PHP associative array
+$data = json_decode($jsonData, true);
+foreach ($toRead as $key => $value){
+    // Check if key exists in the JSON data
+    if (isset($data[$key]) && $data[$key]) {
+        // Access the value
+        $toRead[$key] = $data[$key];
+    } else {
+        echo "The '$key' key was not found in the JSON data.\n";
+        exit();
+    }
 }
-$cookies = implode('; ',$cookies);
-$url = 'https://heatmap-external-a.strava.com/tiles-auth/run/blue/{zoom}/{col}/{row}.png?v=19';
-//https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/13/4226/2935.vector.pbf?sku=101VRqaoOf11D&access_token=pk.eyJ1Ijoic3RyYXZhIiwiYSI6IlpoeXU2U0UifQ.c7yhlZevNRFCqHYm6G6Cyg
+
+if (!($settings = file_get_contents('settings/'.$toRead['settings'].'.json'))){
+    echo "The setting file for ".$toRead['settings']." was not found.\n";
+    exit();
+}
+// Decode the JSON data into a PHP associative array
+$settings_data = json_decode($settings, true);
+
+if (!isset($settings_data['file_ext']) || !($ext = $settings_data['file_ext'])){
+    echo "The file_ext value is missing from settings file for ".$toRead['settings']."\n";
+    exit();
+}
+$format = "image/".$ext;
+if (!isset($settings_data['url']) || !($url = $settings_data['url'])){
+    echo "The url value is missing from settings file for ".$toRead['settings']."\n";
+    exit();
+}
+if (!isset($settings_data['layer']) || !($layer = $settings_data['layer'])){
+    echo "The layer value is missing from settings file for ".$toRead['settings']."\n";
+    exit();
+}
+if (!isset($settings_data['tile_size']) || !($tile_size = $settings_data['tile_size'])){
+    echo "The tile_size value is missing from settings file for ".$toRead['settings']."\n";
+    exit();
+}
+if (!isset($settings_data['zoom']) || !($zoom = $settings_data['zoom'])){
+    echo "The zoom value is missing from settings file for ".$toRead['settings']."\n";
+    exit();
+}
+if (!isset($settings_data['style']) || !($style = $settings_data['style'])){
+    echo "The style value is missing from settings file for ".$toRead['settings']."\n";
+    echo "style = normal \n";
+    $style = "normal";
+}
+
+
+$cookies = array();
+if (isset($settings_data['cookies'])){
+    foreach ($settings_data['cookies'] as $key => $value)
+    {
+        $cookies[] = $key . '=' . $value;
+    }
+    $cookies = implode('; ',$cookies);
+}
 
 set_error_handler(function($code, $string, $file, $line){
-    throw new ErrorException($string, null, $code, $file, $line);
+    throw new ErrorException($string, 0, $code, $file, $line);
 });
 
 register_shutdown_function(function(){
@@ -101,17 +119,12 @@ register_shutdown_function(function(){
     }
 });
 
-
-
-
 function saveImg($imagename,$url,$cookies = ''){
-//    echo $url;
-//    echo "\n";
-//    echo $cookies;
 	$ch = curl_init($url);
 	$fp = fopen($imagename, 'wb');
     //curl_setopt($ch, CURLOPT_VERBOSE, 1);
-    curl_setopt( $ch, CURLOPT_COOKIE, $cookies );
+    if ($cookies)
+        curl_setopt( $ch, CURLOPT_COOKIE, $cookies );
 	curl_setopt($ch, CURLOPT_FILE, $fp);
 	curl_setopt($ch, CURLOPT_HEADER, 0);
 	curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.12) Gecko/20101026 Firefox/3.6.12');
@@ -200,19 +213,50 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
 	imagedestroy($im);
 }
 
-function run(){
-	global $colRange,$rowRange,$tile_size;
-	echo 'run !'."\n";
+function getNeededMemoryForImageCreate($width, $height) {
+    return $width*$height*(5.2);
+}
+
+function run($colRange,$rowRange,$i=0){
+	global $tile_size;
+	echo 'run !'." (level $i)\n";
 	$colmin = $colRange[0];
 	$colmax = $colRange[1];
 	if ($colmin <= $colmax){
 		$rowmin = $rowRange[0];
 		$rowmax = $rowRange[1];
 		if ($rowmin <= $rowmax){
-
+            $width = $tile_size[0]*($colmax-$colmin+1);
+            $height = $tile_size[1]*($rowmax-$rowmin+1);
+            // Estimer la taille en mémoire de l'image en octets
+            $sizeInMemory = getNeededMemoryForImageCreate($width,$height)/1024; // Profondeur de bits : 24 bits (3 octets par pixel)
+            // Récupérer la mémoire disponible
+            $availableMemory = memory_get_usage();
+            // Comparer la taille estimée de l'image avec la mémoire disponible
+            if ($sizeInMemory >= $availableMemory) {
+                echo "Les dimensions de l'image risquent de dépasser la mémoire disponible.\n";
+                echo "$sizeInMemory >= $availableMemory\n";
+                if ($width>$height){
+                    echo "coupe en 2 horizontal.\n";
+                    $half = intval(($colRange[1]-$colRange[0])/2)+$colRange[0];
+                    run([$colRange[0],$half],$rowRange,++$i);
+                    run([$half+1,$colRange[1]],$rowRange,++$i);
+                }else{
+                    echo "coupe en 2 vertical.\n";
+                    $half = intval(($rowRange[1]-$rowRange[0])/2)+$rowRange[0];
+                    run($colRange,[$rowRange[0],$half],++$i);
+                    run($colRange,[$half+1,$rowRange[1]],++$i);
+                }
+                return SUCCESS;
+            }else{
+                echo "mémoire estimée : " . $sizeInMemory . " octets \n";
+            }
 			try {
-				$im = imagecreatetruecolor($tile_size[0]*($colmax-$colmin+1),$tile_size[1]*($rowmax-$rowmin+1)) or die("Cannot Initialize new GD image stream");
+				$im = imagecreatetruecolor($width,$height) or die("Cannot Initialize new GD image stream");
 				generateImg($im,$colmin,$colmax,$rowmin,$rowmax);
+                $peakMemoryUsed = memory_get_peak_usage(); // Pic de mémoire utilisée
+                echo "Pic de mémoire utilisée : " . $peakMemoryUsed . " octets\n";
+                return SUCCESS;
 			} catch (\Exception $exception){
 				die ($exception);
 			}
@@ -225,17 +269,16 @@ function run(){
 	}
 }
 
-if (isset($argv[1]) && $argv[1] == 'half'){
-		echo 'first half !'."\n";
-	    $oldColRange = $colRange;
-        $colRange[1] = intval(($colRange[1]-$colRange[0])/2)+$colRange[0];
-        run();
-        echo 'second half !'."\n";
-        $colRange[0] = $colRange[1]+1;
-        $colRange[1] = $oldColRange[1];
-        run();
-}else{
-	run();
-}
+$availableMemory = memory_get_usage();
+echo "mémoire disponible : " . $availableMemory . " octets \n";
+
+$tileTopLeft = tileCoordFromLatLon($toRead['latTopLeft'],$toRead['lngTopLeft']);
+$tileBottomRight = tileCoordFromLatLon($toRead['latBottomRight'],$toRead['lngBottomRight']);
+
+$colRange = [$tileTopLeft[0],$tileBottomRight[0]];
+$rowRange = [$tileTopLeft[1],$tileBottomRight[1]];
+
+run($colRange,$rowRange);
+echo "mémoire disponible : " . $availableMemory . " octets \n";
 
 
