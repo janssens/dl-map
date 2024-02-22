@@ -1,0 +1,8 @@
+{
+  "layer" : "osmfr",
+  "url" : "https://c.tile.openstreetmap.fr/{layer}/{zoom}/{col}/{row}.png",
+  "file_ext": "png",
+  "tile_size" : [256,256],
+  "zoom" : 16,
+  "style" : "normal"
+}
