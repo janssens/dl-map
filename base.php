@@ -2,10 +2,14 @@
 
 const SUCCESS = 0;
 const OVERFLOW = 1;
-function tileCoordFromLatLon($lat,$lon){
+
+//https://gis.stackexchange.com/questions/133205/wmts-convert-geolocation-lat-long-to-tile-index-at-a-given-zoom-level
+function tileCoordFromLatLon($lat,$lon,$tmc = false){
     global $zoom;
     $xtile = floor((($lon + 180) / 360) * pow(2, $zoom));
     $ytile = floor((1 - log(tan(deg2rad($lat)) + 1 / cos(deg2rad($lat))) / pi()) /2 * pow(2, $zoom));
+    if ($tmc) //https://gist.github.com/tmcw/4954720
+        $ytile = pow(2, $zoom) - $ytile - 1;
     return array($xtile,$ytile);
 }
 
@@ -119,6 +123,20 @@ register_shutdown_function(function(){
     }
 });
 
+function check200($url,$cookies = '')
+{
+    $ch = curl_init($url);
+    if ($cookies)
+        curl_setopt( $ch, CURLOPT_COOKIE, $cookies );
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_HEADER, 1);
+    curl_setopt($ch, CURLOPT_NOBODY, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_exec($ch);
+    $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return $httpcode;
+}
 function saveImg($imagename,$url,$cookies = ''){
 	$ch = curl_init($url);
 	$fp = fopen($imagename, 'wb');
@@ -128,17 +146,22 @@ function saveImg($imagename,$url,$cookies = ''){
 	curl_setopt($ch, CURLOPT_FILE, $fp);
 	curl_setopt($ch, CURLOPT_HEADER, 0);
 	curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.2.12) Gecko/20101026 Firefox/3.6.12');
-	curl_exec($ch);
-    if (curl_errno($ch)) {
+    $response = curl_exec($ch);
+    if (curl_errno($ch) == 3){
+        die('CURLE_URL_MALFORMAT');
+    }
+    if ($response === false || curl_errno($ch)){
         $error_msg = curl_error($ch);
+        echo "\n====\n";
+        echo $url."\n";
+        echo $error_msg;
+        echo('curl error');
+        echo "\n====\n";
+        copy($url, $imagename);
+        die();
     }
     curl_close($ch);
     fclose($fp);
-
-    if (isset($error_msg)) {
-        echo $error_msg;
-        die();
-    }
 }
 
 function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
@@ -155,6 +178,8 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
 
 	if (!is_dir('tile'))
 		mkdir('tile');
+    if (!is_dir('tile'.'/'.$layer))
+        mkdir('tile'.'/'.$layer);
 
 	for ($col = $colmin; $col <= $colmax; $col++){
 		for ($row = $rowmin; $row <= $rowmax; $row++){
@@ -162,9 +187,18 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
 			$current_tile_url = str_replace('{row}', $row, $current_tile_url);
 			$current_tile_url = str_replace('{col}', $col, $current_tile_url);
 			//echo $tile_url."\n";
-			$tile_name = 'tile/t-'.$layer.'-'.$row.'-'.$col.'-'.$zoom.'.'.$ext;
+            $dir = 'tile'.'/'.$layer.'/'.$zoom.'/'.$col.'/';
+            if (!is_dir($dir))
+                mkdir($dir,0777,true);
+			$tile_name = $dir.$row.".".$ext;
 			echo $i++.'/'.$nboftiles;
 			if (!file_exists($tile_name)){
+                $code = check200($current_tile_url,$cookies);
+                if ($code!="200"){
+                    echo "\n";
+                    echo("error, code $code for $current_tile_url");
+                    continue;
+                }
 				saveImg($tile_name,$current_tile_url,$cookies);
 			}else{
 				echo " -- from cache";
@@ -179,6 +213,12 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
                         echo "\n";
                         echo "unlink & download again ...\n";
                         unlink($tile_name);
+                        $code = check200($current_tile_url,$cookies);
+                        if ($code!="200"){
+                            echo "\n";
+                            echo("error, code $code for $current_tile_url");
+                            continue;
+                        }
                         saveImg($tile_name,$current_tile_url,$cookies);
                         $src = imagecreatefrompng($tile_name);
                     }else{
@@ -272,11 +312,14 @@ function run($colRange,$rowRange,$i=0){
 $availableMemory = memory_get_usage();
 echo "mémoire disponible : " . $availableMemory . " octets \n";
 
-$tileTopLeft = tileCoordFromLatLon($toRead['latTopLeft'],$toRead['lngTopLeft']);
-$tileBottomRight = tileCoordFromLatLon($toRead['latBottomRight'],$toRead['lngBottomRight']);
+$tileTopLeft = tileCoordFromLatLon($toRead['latTopLeft'],$toRead['lngTopLeft'],isset($settings_data['tmc']) ? $settings_data['tmc'] : false );
+$tileBottomRight = tileCoordFromLatLon($toRead['latBottomRight'],$toRead['lngBottomRight'],isset($settings_data['tmc']) ? $settings_data['tmc'] : false);
 
-$colRange = [$tileTopLeft[0],$tileBottomRight[0]];
-$rowRange = [$tileTopLeft[1],$tileBottomRight[1]];
+$colRange = [min($tileTopLeft[0],$tileBottomRight[0]),max($tileTopLeft[0],$tileBottomRight[0])];
+$rowRange = [min($tileTopLeft[1],$tileBottomRight[1]),max($tileTopLeft[1],$tileBottomRight[1])];
+
+//print_r($colRange);
+//print_r($rowRange);
 
 run($colRange,$rowRange);
 echo "mémoire disponible : " . $availableMemory . " octets \n";
