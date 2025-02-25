@@ -1,0 +1,52 @@
+<html>
+<head>
+    <style type="text/css">
+        #viewerDiv {
+            width:100%;
+            height:600px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+<div id="viewerDiv"></div>
+<script type="text/javascript">
+    window.onload= function() {
+        var map = L.map("viewerDiv").setView([46.065982057554095,5.691990852355958],10) ;
+        // L.tileLayer(
+        //     'https://data.geopf.fr/wmts?'+
+        //     'service=WMTS&request=GetTile&version=1.0.0&tilematrixset=PM'+
+        //     '&tilematrix={z}&tilecol={x}&tilerow={y}&layer=ORTHOIMAGERY.ORTHOPHOTOS&format=image/jpeg&style=normal',
+        //     {
+        //         minZoom : 0,
+        //         maxZoom : 18,
+        //         tileSize : 256,
+        //     }).addTo(map);
+        L.tileLayer(
+            'https://data.geopf.fr/wmts?'+
+            'service=WMTS&request=GetTile&version=1.0.0&tilematrixset=PM&'+
+            'tilematrix={z}&tilecol={x}&tilerow={y}&'+
+            'layer=ELEVATION.CONTOUR.LINE&format=image/png&style=normal',
+            {
+                minZoom : 0,
+                maxZoom : 18,
+                tileSize : 256,
+                attribution : "IGN-F/Geoportail"
+            }).addTo(map);
+    //     L.tileLayer(
+    //         'https://data.geopf.fr/wmts?'+
+    //         'service=WMTS&request=GetTile&version=1.0.0&tilematrixset=PM&'+
+    //         'tilematrix={z}&tilecol={x}&tilerow={y}&'+
+    //         'layer=\tELEVATIONGRIDCOVERAGE.HIGHRES.QUALITY&format=image/png&style=normal',
+    //         {
+    //             minZoom : 0,
+    //             maxZoom : 18,
+    //             tileSize : 256,
+    //             attribution : "IGN-F/Geoportail"
+    //         }).addTo(map);
+     }
+</script>
+</body>
+</html>

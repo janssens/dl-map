@@ -1,7 +1,10 @@
 {
   "layer" : "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD",
-  "url" : "https://wxs.ign.fr/xx--KEY--xx/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}",
-  "file_ext": "jpeg",
+  "url" : "https://data.geopf.fr/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}",
+  "cookies" : {
+    "lb_35e321a6e8640bf097316e2c56e481f2" : ""
+  },
+  "file_ext": "png",
   "tile_size" : [256,256],
   "zoom" : 16,
   "style" : "normal"
