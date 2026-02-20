@@ -3,6 +3,8 @@
 const SUCCESS = 0;
 const OVERFLOW = 1;
 
+$generatedParts = array();
+
 //https://gis.stackexchange.com/questions/133205/wmts-convert-geolocation-lat-long-to-tile-index-at-a-given-zoom-level
 function tileCoordFromLatLon($lat,$lon,$tmc = false){
     global $zoom;
@@ -257,47 +259,148 @@ function getNeededMemoryForImageCreate($width, $height) {
     return $width*$height*(5.2);
 }
 
+function memoryLimitToBytes($value) {
+    $value = trim($value);
+    if ($value === '' || $value === '-1'){
+        return -1;
+    }
+
+    $unit = strtolower(substr($value, -1));
+    $number = (float)$value;
+
+    switch ($unit) {
+        case 'g':
+            $number *= 1024;
+            // no break
+        case 'm':
+            $number *= 1024;
+            // no break
+        case 'k':
+            $number *= 1024;
+    }
+
+    return (int)$number;
+}
+
+function getSafeAvailableMemoryBytes() {
+    $limit = memoryLimitToBytes((string)ini_get('memory_limit'));
+    if ($limit < 0){
+        return PHP_INT_MAX;
+    }
+
+    $currentUsage = memory_get_usage(true);
+    // Reserve a small buffer to avoid hitting memory limit due to overhead/spikes.
+    $reserve = 32 * 1024 * 1024;
+    return max(0, $limit - $currentUsage - $reserve);
+}
+
+function registerGeneratedPart($path, $colmin, $colmax, $rowmin, $rowmax){
+    global $generatedParts;
+    $generatedParts[] = array(
+        'path' => $path,
+        'colmin' => $colmin,
+        'colmax' => $colmax,
+        'rowmin' => $rowmin,
+        'rowmax' => $rowmax
+    );
+}
+
+function assembleGeneratedPartsIfPossible($fullColRange, $fullRowRange){
+    global $generatedParts, $tile_size, $layer;
+
+    if (count($generatedParts) <= 1){
+        return SUCCESS;
+    }
+
+    $fullColMin = $fullColRange[0];
+    $fullColMax = $fullColRange[1];
+    $fullRowMin = $fullRowRange[0];
+    $fullRowMax = $fullRowRange[1];
+
+    $width = $tile_size[0] * ($fullColMax - $fullColMin + 1);
+    $height = $tile_size[1] * ($fullRowMax - $fullRowMin + 1);
+    $sizeInMemory = getNeededMemoryForImageCreate($width, $height);
+    $availableMemory = getSafeAvailableMemoryBytes();
+
+    if ($sizeInMemory >= $availableMemory){
+        echo "Assemblage final impossible: mémoire insuffisante pour une image unique.\n";
+        echo "$sizeInMemory >= $availableMemory\n";
+        return OVERFLOW;
+    }
+
+    echo "Assemblage final des morceaux en un seul fichier...\n";
+    $im = imagecreatetruecolor($width,$height) or die("Cannot Initialize new GD image stream");
+
+    foreach ($generatedParts as $part){
+        try {
+            $src = imagecreatefrompng($part['path']);
+        } catch (Exception $e){
+            echo "Impossible de charger le morceau: ".$part['path']."\n";
+            continue;
+        }
+
+        $dstX = ($part['colmin'] - $fullColMin) * $tile_size[0];
+        $dstY = ($part['rowmin'] - $fullRowMin) * $tile_size[1];
+        $partWidth = ($part['colmax'] - $part['colmin'] + 1) * $tile_size[0];
+        $partHeight = ($part['rowmax'] - $part['rowmin'] + 1) * $tile_size[1];
+
+        imagecopy($im, $src, $dstX, $dstY, 0, 0, $partWidth, $partHeight);
+        imagedestroy($src);
+    }
+
+    imagealphablending($im , false);
+    $finalPath = $layer.$fullColMin.'-'.$fullColMax.'_'.$fullRowMin.'-'.$fullRowMax.'.png';
+    imagepng($im, $finalPath);
+    imagedestroy($im);
+    echo "Fichier final généré: ".$finalPath."\n";
+    return SUCCESS;
+}
+
 function run($colRange,$rowRange,$i=0){
-	global $tile_size;
+	global $tile_size, $layer;
 	echo 'run !'." (level $i)\n";
 	$colmin = $colRange[0];
 	$colmax = $colRange[1];
 	if ($colmin <= $colmax){
 		$rowmin = $rowRange[0];
 		$rowmax = $rowRange[1];
-		if ($rowmin <= $rowmax){
-            $width = $tile_size[0]*($colmax-$colmin+1);
-            $height = $tile_size[1]*($rowmax-$rowmin+1);
-            // Estimer la taille en mémoire de l'image en octets
-            $sizeInMemory = getNeededMemoryForImageCreate($width,$height)/1024; // Profondeur de bits : 24 bits (3 octets par pixel)
-            // Récupérer la mémoire disponible
-            $availableMemory = memory_get_usage();
-            // Comparer la taille estimée de l'image avec la mémoire disponible
-            if ($sizeInMemory >= $availableMemory) {
-                echo "Les dimensions de l'image risquent de dépasser la mémoire disponible.\n";
-                echo "$sizeInMemory >= $availableMemory\n";
-                if ($width>$height){
-                    echo "coupe en 2 horizontal.\n";
-                    $half = intval(($colRange[1]-$colRange[0])/2)+$colRange[0];
-                    run([$colRange[0],$half],$rowRange,++$i);
-                    run([$half+1,$colRange[1]],$rowRange,++$i);
-                }else{
-                    echo "coupe en 2 vertical.\n";
-                    $half = intval(($rowRange[1]-$rowRange[0])/2)+$rowRange[0];
-                    run($colRange,[$rowRange[0],$half],++$i);
-                    run($colRange,[$half+1,$rowRange[1]],++$i);
-                }
-                return SUCCESS;
-            }else{
-                echo "mémoire estimée : " . $sizeInMemory . " octets \n";
-            }
-			try {
-				$im = imagecreatetruecolor($width,$height) or die("Cannot Initialize new GD image stream");
-				generateImg($im,$colmin,$colmax,$rowmin,$rowmax);
-                $peakMemoryUsed = memory_get_peak_usage(); // Pic de mémoire utilisée
-                echo "Pic de mémoire utilisée : " . $peakMemoryUsed . " octets\n";
-                return SUCCESS;
-			} catch (\Exception $exception){
+			if ($rowmin <= $rowmax){
+	            $width = $tile_size[0]*($colmax-$colmin+1);
+	            $height = $tile_size[1]*($rowmax-$rowmin+1);
+	            // Estimer la taille mémoire en octets.
+	            $sizeInMemory = getNeededMemoryForImageCreate($width,$height);
+	            $availableMemory = getSafeAvailableMemoryBytes();
+	            // Comparer la taille estimée de l'image avec la mémoire disponible
+	            if ($sizeInMemory >= $availableMemory) {
+	                echo "Les dimensions de l'image risquent de dépasser la mémoire disponible.\n";
+	                echo "$sizeInMemory >= $availableMemory\n";
+                    if ($colmin == $colmax && $rowmin == $rowmax){
+                        echo "Impossible de découper davantage (1 seule tuile).\n";
+                        return OVERFLOW;
+                    }
+	                if ($width>$height){
+	                    echo "coupe en 2 horizontal.\n";
+	                    $half = intval(($colRange[1]-$colRange[0])/2)+$colRange[0];
+	                    run([$colRange[0],$half],$rowRange,$i+1);
+	                    run([$half+1,$colRange[1]],$rowRange,$i+1);
+	                }else{
+	                    echo "coupe en 2 vertical.\n";
+	                    $half = intval(($rowRange[1]-$rowRange[0])/2)+$rowRange[0];
+	                    run($colRange,[$rowRange[0],$half],$i+1);
+	                    run($colRange,[$half+1,$rowRange[1]],$i+1);
+	                }
+	                return SUCCESS;
+	            }else{
+	                echo "mémoire estimée : " . $sizeInMemory . " octets \n";
+	            }
+				try {
+					$im = imagecreatetruecolor($width,$height) or die("Cannot Initialize new GD image stream");
+					generateImg($im,$colmin,$colmax,$rowmin,$rowmax);
+                    registerGeneratedPart($layer.$colmin.'-'.$colmax.'_'.$rowmin.'-'.$rowmax.'.png', $colmin, $colmax, $rowmin, $rowmax);
+	                $peakMemoryUsed = memory_get_peak_usage(); // Pic de mémoire utilisée
+	                echo "Pic de mémoire utilisée : " . $peakMemoryUsed . " octets\n";
+	                return SUCCESS;
+				} catch (\Exception $exception){
 				die ($exception);
 			}
 
@@ -322,6 +425,5 @@ $rowRange = [min($tileTopLeft[1],$tileBottomRight[1]),max($tileTopLeft[1],$tileB
 //print_r($rowRange);
 
 run($colRange,$rowRange);
+assembleGeneratedPartsIfPossible($colRange, $rowRange);
 echo "mémoire disponible : " . $availableMemory . " octets \n";
-
-
