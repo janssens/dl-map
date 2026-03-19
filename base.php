@@ -140,8 +140,8 @@ function check200($url,$cookies = '')
     return $httpcode;
 }
 function saveImg($imagename,$url,$cookies = ''){
-	$ch = curl_init($url);
-	$fp = fopen($imagename, 'wb');
+		$ch = curl_init($url);
+		$fp = fopen($imagename, 'wb');
     //curl_setopt($ch, CURLOPT_VERBOSE, 1);
     if ($cookies)
         curl_setopt( $ch, CURLOPT_COOKIE, $cookies );
@@ -162,14 +162,53 @@ function saveImg($imagename,$url,$cookies = ''){
         copy($url, $imagename);
         die();
     }
-    curl_close($ch);
-    fclose($fp);
+	    curl_close($ch);
+	    fclose($fp);
+	}
+
+function loadTileImageWithRetries($tilePath, $tileUrl, $format, $cookies = '', $maxAttempts = 3){
+    $lastError = null;
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++){
+        $fromCache = file_exists($tilePath);
+        if (!$fromCache){
+            $code = check200($tileUrl, $cookies);
+            if ($code != "200"){
+                throw new RuntimeException("HTTP $code for $tileUrl");
+            }
+            saveImg($tilePath, $tileUrl, $cookies);
+        }
+
+        try {
+            if ($format === "image/png"){
+                return imagecreatefrompng($tilePath);
+            }
+            if ($format === "image/jpeg"){
+                return imagecreatefromjpeg($tilePath);
+            }
+            throw new RuntimeException("Unsupported format: $format");
+        } catch (Throwable $e){
+            $lastError = $e;
+            echo "error = ".$e->getMessage()."\n";
+            echo $tilePath."\n";
+
+            if ($attempt >= $maxAttempts){
+                break;
+            }
+
+            echo "unlink & download again ... (try ".($attempt + 1)."/$maxAttempts)\n";
+            if (file_exists($tilePath)){
+                @unlink($tilePath);
+            }
+        }
+    }
+
+    throw $lastError ?: new RuntimeException("Failed to load tile after $maxAttempts attempts: $tilePath");
 }
 
 function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
-	global $url,$style,$zoom,$layer,$format,$ext,$tile_size,$cookies;
-	$tile_url = $url;
-	$tile_url = str_replace('{style}', $style, $tile_url);
+		global $url,$style,$zoom,$layer,$format,$ext,$tile_size,$cookies;
+		$tile_url = $url;
+		$tile_url = str_replace('{style}', $style, $tile_url);
 	$tile_url = str_replace('{zoom}', $zoom, $tile_url);
 	$tile_url = str_replace('{layer}', $layer, $tile_url);
 	$tile_url = str_replace('{format}', $format, $tile_url);
@@ -192,57 +231,32 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
             $dir = 'tile'.'/'.$layer.'/'.$zoom.'/'.$col.'/';
             if (!is_dir($dir))
                 mkdir($dir,0777,true);
-			$tile_name = $dir.$row.".".$ext;
-			echo $i++.'/'.$nboftiles;
-			if (!file_exists($tile_name)){
-                $code = check200($current_tile_url,$cookies);
-                if ($code!="200"){
-                    echo "\n";
-                    echo("error, code $code for $current_tile_url");
-                    continue;
-                }
-				saveImg($tile_name,$current_tile_url,$cookies);
-			}else{
-				echo " -- from cache";
-			}
-			if ($format == "image/png")
-                try {
-				    $src = imagecreatefrompng($tile_name);
-                } catch (Exception $e){
-                    echo "error = ".$e->getMessage();echo "\n";
-                    echo "$tile_name";
-                    if (strpos($e->getMessage(),'is not a valid PNG file')>0){
-                        echo "\n";
-                        echo "unlink & download again ...\n";
-                        unlink($tile_name);
-                        $code = check200($current_tile_url,$cookies);
-                        if ($code!="200"){
-                            echo "\n";
-                            echo("error, code $code for $current_tile_url");
-                            continue;
-                        }
-                        saveImg($tile_name,$current_tile_url,$cookies);
-                        $src = imagecreatefrompng($tile_name);
-                    }else{
-                        echo "\n";
-                        die();
+				$tile_name = $dir.$row.".".$ext;
+				echo $i++.'/'.$nboftiles;
+				if (!file_exists($tile_name)){
+	                $code = check200($current_tile_url,$cookies);
+	                if ($code!="200"){
+	                    echo "\n";
+	                    echo("error, code $code for $current_tile_url");
+	                    continue;
+	                }
+					saveImg($tile_name,$current_tile_url,$cookies);
+				}else{
+					echo " -- from cache";
+				}
+				$src = null;
+				if ($format == "image/png" || $format == "image/jpeg"){
+                    try {
+                        $src = loadTileImageWithRetries($tile_name, $current_tile_url, $format, $cookies, 3);
+                    } catch (Throwable $e){
+                        die("CRITICAL: cannot load tile after 3 attempts: ".$e->getMessage()."\n");
                     }
                 }
-			else if ($format == "image/jpeg"){
-                try {
-                    $src = imagecreatefromjpeg($tile_name);
-                } catch (Exception $e){
-                    echo "error = ".$e->getMessage();echo "\n";
-                    echo "$tile_name";
-                    echo "\n";
-                    die();
-                }
-            }
-			
-			if ($src){
-				imagecopy($im, $src, ($col-$colmin)*$tile_size[0] , ($row-$rowmin)*$tile_size[1] , 0 , 0 , $tile_size[0],$tile_size[1] );
-				imagedestroy($src);
-			}else{
+				
+				if ($src){
+					imagecopy($im, $src, ($col-$colmin)*$tile_size[0] , ($row-$rowmin)*$tile_size[1] , 0 , 0 , $tile_size[0],$tile_size[1] );
+					imagedestroy($src);
+				}else{
 				echo "error = ".$current_tile_url;echo "\n";
 			}
 			
@@ -256,8 +270,10 @@ function generateImg(&$im,$colmin,$colmax,$rowmin,$rowmax){
 }
 
 function getNeededMemoryForImageCreate($width, $height) {
-    return $width*$height*(5.2);
-}
+	    // Heuristic for GD truecolor images + extra overhead (PNG encoding can spike).
+	    // Keep this slightly conservative to avoid fatal "Allowed memory size exhausted".
+	    return $width*$height*(6.5);
+	}
 
 function memoryLimitToBytes($value) {
     $value = trim($value);
@@ -290,7 +306,7 @@ function getSafeAvailableMemoryBytes() {
 
     $currentUsage = memory_get_usage(true);
     // Reserve a small buffer to avoid hitting memory limit due to overhead/spikes.
-    $reserve = 32 * 1024 * 1024;
+    $reserve = 64 * 1024 * 1024;
     return max(0, $limit - $currentUsage - $reserve);
 }
 
@@ -305,17 +321,75 @@ function registerGeneratedPart($path, $colmin, $colmax, $rowmin, $rowmax){
     );
 }
 
-function assembleGeneratedPartsIfPossible($fullColRange, $fullRowRange){
-    global $generatedParts, $tile_size, $layer;
-
-    if (count($generatedParts) <= 1){
-        return SUCCESS;
+function toLowerCamelCase($value) {
+    $value = preg_replace('/[^a-zA-Z0-9]+/', ' ', (string)$value);
+    $parts = preg_split('/\\s+/', trim($value));
+    if (!$parts || count($parts) === 0){
+        return '';
     }
+
+    $first = strtolower(array_shift($parts));
+    $rest = array_map(function($part){
+        $part = strtolower($part);
+        return $part === '' ? '' : ucfirst($part);
+    }, $parts);
+
+    return $first . implode('', $rest);
+}
+
+function metersPerPixelForZoom($zoom){
+    // Values from the table in the comment at the beginning of this file.
+    $mppByZoom = array(
+        0 => '156412',
+        1 => '78206',
+        2 => '39103',
+        3 => '19551',
+        4 => '9776',
+        5 => '4888',
+        6 => '2444',
+        7 => '1222',
+        8 => '610.984',
+        9 => '305.492',
+        10 => '152.746',
+        11 => '76.373',
+        12 => '38.187',
+        13 => '19.093',
+        14 => '9.547',
+        15 => '4.773',
+        16 => '2.387',
+        17 => '1.193',
+        18 => '0.596',
+        19 => '0.298',
+    );
+
+    $zoom = (int)$zoom;
+    return $mppByZoom[$zoom] ?? null;
+}
+
+function assembleGeneratedPartsIfPossible($fullColRange, $fullRowRange){
+    global $generatedParts, $tile_size, $layer, $zoom;
 
     $fullColMin = $fullColRange[0];
     $fullColMax = $fullColRange[1];
     $fullRowMin = $fullRowRange[0];
     $fullRowMax = $fullRowRange[1];
+
+    $timestamp = date('Ymd_His');
+    $layerCamel = toLowerCamelCase($layer);
+    $mpp = metersPerPixelForZoom($zoom);
+    $mppLabel = $mpp ? (str_replace('.', 'p', $mpp) . 'mpp') : 'mppUnknown';
+    $finalPath = $timestamp . '_' . $layerCamel . '_' . $mppLabel . '_' . $fullColMin . '-' . $fullColMax . '_' . $fullRowMin . '-' . $fullRowMax . '.png';
+
+    if (count($generatedParts) <= 1){
+        if (count($generatedParts) === 1 && isset($generatedParts[0]['path']) && $generatedParts[0]['path'] !== $finalPath){
+            $oldPath = $generatedParts[0]['path'];
+            if (file_exists($oldPath)){
+                rename($oldPath, $finalPath);
+                echo "Fichier final généré: ".$finalPath."\n";
+            }
+        }
+        return SUCCESS;
+    }
 
     $width = $tile_size[0] * ($fullColMax - $fullColMin + 1);
     $height = $tile_size[1] * ($fullRowMax - $fullRowMin + 1);
@@ -349,7 +423,6 @@ function assembleGeneratedPartsIfPossible($fullColRange, $fullRowRange){
     }
 
     imagealphablending($im , false);
-    $finalPath = $layer.$fullColMin.'-'.$fullColMax.'_'.$fullRowMin.'-'.$fullRowMax.'.png';
     imagepng($im, $finalPath);
     imagedestroy($im);
     echo "Fichier final généré: ".$finalPath."\n";

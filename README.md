@@ -24,3 +24,14 @@ You need docker and docker compose on your computer.
 ```bash
 docker compose up
 ```
+
+### Memory limit
+
+If you hit `Allowed memory size ... exhausted`, increase PHP memory and/or the container memory:
+
+```bash
+# PHP only (override in compose)
+PHP_MEMORY_LIMIT=2G docker compose up --build
+```
+
+On Docker Desktop, also ensure the VM/container has enough RAM allocated (Settings → Resources).
