@@ -1,17 +1,13 @@
 services:
 
-  # PHP service
-  app:
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    working_dir: /var/www/
+    working_dir: /var/www/html
     volumes:
-      - ./:/var/www
+      - ./:/var/www/html
     environment:
       PHP_MEMORY_LIMIT: 1024M
-    command:
-      - php
-      - -d
-      - memory_limit=${PHP_MEMORY_LIMIT}
-      - base.php
+    ports:
+      - "8080:80"

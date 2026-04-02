@@ -1,11 +1,11 @@
 {
-  "layer" : "osmfr",
-  "url" : "https://c.tile.openstreetmap.fr/{layer}/{z}/{x}/{y}.png",
+  "layer" : "opentopomap",
+  "url" : "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
   "file_ext": "png",
   "tile_size" : [256,256],
   "zoom" : 16,
   "leaflet_min_zoom" : 0,
-  "leaflet_max_zoom" : 19,
+  "leaflet_max_zoom" : 17,
   "leaflet_default_zoom" : 16,
   "style" : "normal"
 }

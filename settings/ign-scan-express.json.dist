@@ -1,11 +1,14 @@
 {
   "layer" : "GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-EXPRESS.STANDARD",
-  "url" : "https://data.geopf.fr/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}",
+  "url" : "https://data.geopf.fr/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={z}&TileCol={x}&TileRow={y}",
   "cookies" : {
     "lb_35e321a6e8640bf097316e2c56e481f2" : ""
   },
   "file_ext": "png",
   "tile_size" : [256,256],
   "zoom" : 16,
+  "leaflet_min_zoom" : 0,
+  "leaflet_max_zoom" : 18,
+  "leaflet_default_zoom" : 16,
   "style" : "normal"
 }

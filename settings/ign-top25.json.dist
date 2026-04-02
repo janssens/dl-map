@@ -1,8 +1,11 @@
 {
   "layer" : "GEOGRAPHICALGRIDSYSTEMS.MAPS",
-  "url" : "https://data.geopf.fr/xx--KEY--xx/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={zoom}&TileCol={col}&TileRow={row}",
+  "url" : "https://data.geopf.fr/xx--KEY--xx/geoportail/wmts?layer={layer}&style={style}&tilematrixset=PM&Service=WMTS&Request=GetTile&Version=1.0.0&Format={format}&TileMatrix={z}&TileCol={x}&TileRow={y}",
   "file_ext": "jpeg",
   "tile_size" : [256,256],
   "zoom" : 16,
+  "leaflet_min_zoom" : 0,
+  "leaflet_max_zoom" : 18,
+  "leaflet_default_zoom" : 16,
   "style" : "normal"
 }

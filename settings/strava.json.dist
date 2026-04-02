@@ -5,8 +5,11 @@
     "CloudFront-Policy" : "eyJTdGF0ZW1lbnQiOiBbeyJSZXNvdXJjZSI6Imh0dHBzOi8vKmNvbnRlbnQtKi5zdHJhdmEuY29tL2lkZW50aWZpZWQvKiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc0MTg5NzM5OX19fV19",
     "CloudFront-Signature" : "COomALfg1a9DOZy7-ZXca6zuWxGrKiZlKIkkoThGHphQdElKChd~cfg-BmMLuWOZw9zTE1J2pSAnw~8QDKWHqT43scWnpotJJd0Vd-XZO8U20Fh5YV8KQtMoiz3Nxc3rR1PWXVdnp00qXg4n1OCc4zCurVsnSGheOU6FhKxCpTB~TLwJT5fnCaKMVhFad84zXa5rZd-hbKsYGswsGFTFnHLIm8ZWMbHMKwhiUiTLarZ62gu54CzvU6Gv9nCdCgrYHQFLknIT8OOFnHQn2W9jjyVvGkNAhMO7KT61byYS8Nam4a-bING3exhEIsymmmDtjC6A3O5FwlnRL0IEAfY44w__"
   },
-  "url" : "https://heatmap-external-a.strava.com/tiles-auth/run/blue/{zoom}/{col}/{row}.png?v=19",
+  "url" : "https://heatmap-external-a.strava.com/tiles-auth/run/blue/{z}/{x}/{y}.png?v=19",
   "file_ext": "png",
   "tile_size" : [512,512],
-  "zoom" : 15
+  "zoom" : 15,
+  "leaflet_min_zoom" : 0,
+  "leaflet_max_zoom" : 15,
+  "leaflet_default_zoom" : 15
 }
