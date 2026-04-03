@@ -30,7 +30,7 @@ final class MapGenerator {
 
     /**
      * @param array{latTopLeft:float,lngTopLeft:float,latBottomRight:float,lngBottomRight:float,settings:string} $config
-     * @return array{status:int,finalPath:string|null,parts:array,tilesTotal:int}
+     * @return array{status:int,finalPath:string|null,parts:array,tilesTotal:int,colRange:array{0:int,1:int},rowRange:array{0:int,1:int},zoom:int,tms:bool}
      */
     public function generate(array $config, string $outputDir = '.', ?callable $progressCallback = null): array {
         $this->outputDir = rtrim($outputDir, '/');
@@ -92,6 +92,10 @@ final class MapGenerator {
             'finalPath' => $finalPath,
             'parts' => $this->generatedParts,
             'tilesTotal' => $this->tilesTotal,
+            'colRange' => [(int)$colRange[0], (int)$colRange[1]],
+            'rowRange' => [(int)$rowRange[0], (int)$rowRange[1]],
+            'zoom' => $this->zoom,
+            'tms' => $tms,
         ];
     }
 
@@ -397,4 +401,3 @@ final class MapGenerator {
         return $this->generatedParts[0]['path'];
     }
 }
-

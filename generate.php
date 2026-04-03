@@ -193,7 +193,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
     <div id="done-block" style="display:none; margin-top: 0.75rem;">
         <div class="row">
             <a class="btn" href="index.php">Nouvelle génération</a>
-            <a class="btn" id="download-link" href="#">Télécharger l'image</a>
+            <a class="btn" id="download-png-link" href="#">Télécharger PNG</a>
+            <a class="btn" id="download-jpg-link" href="#">Télécharger JPG</a>
+            <a class="btn" id="download-gpx-link" href="#">Télécharger GPX</a>
+            <a class="btn" id="download-kmz-link" href="#">Télécharger KMZ</a>
+        </div>
+        <div id="meta-block" style="display:none; margin-top: 0.75rem;">
+            <div class="muted">Centre (WGS84)</div>
+            <div class="mono" id="center-text"></div>
+            <div class="muted" style="margin-top: 0.5rem;">UTM du centre</div>
+            <div class="mono" id="utm-text"></div>
+            <div class="muted" style="margin-top: 0.5rem;">Déclinaison magnétique (WMM2025) au centre</div>
+            <div class="mono" id="decl-text"></div>
         </div>
         <img id="result-img" alt="Résultat"/>
     </div>
@@ -219,7 +230,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
     const errorBlock = document.querySelector('#error-block');
     const errorPre = document.querySelector('#error-pre');
     const resultImg = document.querySelector('#result-img');
-    const downloadLink = document.querySelector('#download-link');
+    const downloadPngLink = document.querySelector('#download-png-link');
+    const downloadJpgLink = document.querySelector('#download-jpg-link');
+    const downloadGpxLink = document.querySelector('#download-gpx-link');
+    const downloadKmzLink = document.querySelector('#download-kmz-link');
+    const metaBlock = document.querySelector('#meta-block');
+    const centerText = document.querySelector('#center-text');
+    const utmText = document.querySelector('#utm-text');
+    const declText = document.querySelector('#decl-text');
+
+    function fmtFloat(v, digits){
+        digits = (typeof digits === 'number' ? digits : 6);
+        if (typeof v !== 'number' || !isFinite(v)){
+            return '';
+        }
+        return v.toFixed(digits).replace(/\.?0+$/, '').replace('.', ',');
+    }
+
+    function fmtDeg(v){
+        if (typeof v !== 'number' || !isFinite(v)){
+            return '';
+        }
+        const s = v >= 0 ? '+' : '';
+        return `${s}${fmtFloat(v, 2)}°`;
+    }
 
     let lastState = null;
     async function poll(){
@@ -237,9 +271,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
 
             if (json.state === 'done'){
                 doneBlock.style.display = 'block';
-                const url = `result.php?job=${encodeURIComponent(jobId)}&t=${Date.now()}`;
-                resultImg.src = url;
-                downloadLink.href = url;
+                const pngUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&t=${Date.now()}`;
+                const pngDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&download=1&t=${Date.now()}`;
+                const jpgDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=jpg&download=1&t=${Date.now()}`;
+                const gpxDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=gpx&download=1&t=${Date.now()}`;
+                const kmzDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=kmz&download=1&t=${Date.now()}`;
+                resultImg.src = pngUrl;
+                downloadPngLink.href = pngDlUrl;
+                downloadJpgLink.href = jpgDlUrl;
+                downloadGpxLink.href = gpxDlUrl;
+                downloadKmzLink.href = kmzDlUrl;
+
+                if (json.meta && json.meta.center && json.meta.utm && json.meta.magnetic && typeof json.meta.magnetic.declinationDeg === 'number'){
+                    metaBlock.style.display = 'block';
+                    centerText.textContent = `lat ${fmtFloat(json.meta.center.lat, 6)}, lon ${fmtFloat(json.meta.center.lon, 6)}`;
+                    const utm = json.meta.utm;
+                    const zone = (utm.zone || '') + (utm.band || '');
+                    utmText.textContent = `${zone} ${utm.hemisphere || ''}  E ${fmtFloat(utm.easting, 2)}  N ${fmtFloat(utm.northing, 2)}`;
+                    declText.textContent = fmtDeg(json.meta.magnetic.declinationDeg);
+                } else if (json.meta && json.meta.error){
+                    metaBlock.style.display = 'block';
+                    centerText.textContent = '';
+                    utmText.textContent = '';
+                    declText.textContent = `Indisponible (${json.meta.error})`;
+                }
                 return;
             }
 

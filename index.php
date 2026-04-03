@@ -104,8 +104,68 @@ $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
         return settingsMeta[id] || null;
     }
 
+    function getCookie(name){
+        const prefix = name + '=';
+        const parts = (document.cookie || '').split(';');
+        for (const part of parts){
+            const trimmed = part.trim();
+            if (trimmed.startsWith(prefix)){
+                return decodeURIComponent(trimmed.substring(prefix.length));
+            }
+        }
+        return null;
+    }
+
+    function setCookie(name, value, maxAgeSeconds){
+        const safe = encodeURIComponent(String(value));
+        const attrs = [
+            `${name}=${safe}`,
+            `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds || 0))}`,
+            'Path=/',
+            'SameSite=Lax',
+        ];
+        document.cookie = attrs.join('; ');
+    }
+
+    function loadSavedMapView(){
+        const raw = getCookie('dlmap_view_v1');
+        if (!raw){
+            return null;
+        }
+        try {
+            const json = JSON.parse(raw);
+            const lat = parseFloat(json.lat);
+            const lng = parseFloat(json.lng);
+            const zoom = parseInt(json.zoom, 10);
+            if (!isFinite(lat) || !isFinite(lng) || !isFinite(zoom)){
+                return null;
+            }
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180){
+                return null;
+            }
+            return { lat, lng, zoom };
+        } catch (e){
+            return null;
+        }
+    }
+
+    function saveMapView(map){
+        const c = map.getCenter();
+        const z = map.getZoom();
+        const payload = JSON.stringify({ lat: c.lat, lng: c.lng, zoom: z });
+        // 180 days
+        setCookie('dlmap_view_v1', payload, 180 * 24 * 60 * 60);
+    }
+
     // Default center: Mont Aiguille (France)
-    const map = L.map('map').setView([44.8442, 5.5526], 13);
+    const savedView = loadSavedMapView();
+    const map = L.map('map').setView(
+        savedView ? [savedView.lat, savedView.lng] : [44.8442, 5.5526],
+        savedView ? savedView.zoom : 13
+    );
+    map.on('moveend', function(){
+        saveMapView(map);
+    });
 
     const layersBySetting = {};
     const baseLayers = {};
