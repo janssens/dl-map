@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+function curl_user_agent(): string {
+    return 'dl-map/1.0';
+}
+
 function tile_cache_dir_path(): string {
     return __DIR__ . '/../tile';
 }
@@ -68,11 +72,15 @@ function check200(string $url, string $cookies = ''): int {
     curl_setopt($ch, CURLOPT_HEADER, 0);
     curl_setopt($ch, CURLOPT_RANGE, '0-0');
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
+    curl_setopt($ch, CURLOPT_USERAGENT, curl_user_agent());
     curl_exec($ch);
     $httpcode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     return $httpcode;
+}
+
+function is_success_tile_http_code(int $httpCode): bool {
+    return $httpCode === 200 || $httpCode === 206;
 }
 
 function save_img(string $imagePath, string $url, string $cookies = ''): void {
@@ -96,7 +104,7 @@ function save_img(string $imagePath, string $url, string $cookies = ''): void {
     }
     curl_setopt($ch, CURLOPT_FILE, $fp);
     curl_setopt($ch, CURLOPT_HEADER, 0);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
+    curl_setopt($ch, CURLOPT_USERAGENT, curl_user_agent());
 
     $response = curl_exec($ch);
     if ($response === false || curl_errno($ch)){
@@ -105,9 +113,26 @@ function save_img(string $imagePath, string $url, string $cookies = ''): void {
         fclose($fp);
         throw new RuntimeException("curl error for $url: $error_msg");
     }
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
     curl_close($ch);
     fclose($fp);
+
+    if (!is_success_tile_http_code($httpCode)){
+        if (is_file($imagePath)){
+            @unlink($imagePath);
+        }
+        throw new RuntimeException("upstream returned HTTP $httpCode for $url");
+    }
+
+    clearstatcache(true, $imagePath);
+    $size = @filesize($imagePath);
+    if ($size === false || $size <= 0){
+        if (is_file($imagePath)){
+            @unlink($imagePath);
+        }
+        throw new RuntimeException("empty tile file downloaded for $url");
+    }
 }
 
 function tile_cache_path(array $settings, int $z, int $x, int $y): string {

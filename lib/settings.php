@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db.php';
+
 function settings_dir_path(): string {
     return __DIR__ . '/../settings';
 }
@@ -34,6 +36,27 @@ function find_settings_file(string $settingsId): ?string {
 
 function load_settings(string $settingsId): array {
     $path = find_settings_file($settingsId);
+    // Prefer DB layers when available (web app), but keep file fallback (CLI/legacy).
+    try {
+        db_migrate();
+        $settingsId = normalize_settings_id($settingsId);
+        if ($settingsId !== ''){
+            $stmt = db()->prepare('SELECT settings_json FROM layers WHERE slug = ? LIMIT 1');
+            $stmt->execute([$settingsId]);
+            $raw = $stmt->fetchColumn();
+            if (is_string($raw) && trim($raw) !== ''){
+                $fromDb = json_decode($raw, true);
+                if (is_array($fromDb)){
+                    $fromDb['_id'] = $settingsId;
+                    $fromDb['_path'] = '(db)';
+                    return $fromDb;
+                }
+            }
+        }
+    } catch (Throwable $e){
+        // ignore DB issues and fallback to files
+    }
+
     if ($path === null){
         throw new RuntimeException("Unknown settings: $settingsId");
     }
@@ -80,4 +103,3 @@ function list_settings(): array {
     usort($out, fn($a, $b) => strcmp($a['label'], $b['label']));
     return $out;
 }
-

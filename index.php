@@ -2,29 +2,81 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/lib/settings.php';
+require_once __DIR__ . '/lib/app.php';
+require_once __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/layers.php';
+require_once __DIR__ . '/lib/layout.php';
 
-$settingsList = list_settings();
-if (count($settingsList) === 0){
+app_boot();
+$user = auth_current_user();
+
+$extraHeadHtml = '';
+
+if (!$user){
+    layout_header("dl-map", null);
+    ?>
+    <div class="card">
+        <h2 style="margin-top:0;">Générer une carte PNG depuis des tuiles</h2>
+        <p class="muted" style="margin-top:0.5rem;">
+            Sélectionnez une zone sur la carte, choisissez un fond de carte (layer), puis lancez une génération.
+            L'application télécharge les tuiles (avec cache) et assemble l'image finale, avec des exports utiles (PNG/JPG/GPX/KMZ/OMAP…).
+        </p>
+        <div class="row" style="margin-top:1rem;">
+            <a class="btn" href="/register.php">Créer un compte</a>
+            <a class="btn secondary" href="/login.php">Se connecter</a>
+        </div>
+        <div class="muted" style="margin-top:0.75rem;">
+            Un compte est requis pour accéder à l'outil (gestion des layers, droits premium, layers privés).
+        </div>
+    </div>
+    <?php
+    layout_footer();
+    exit;
+}
+
+$layers = layers_list_for_user($user);
+if (count($layers) === 0){
     http_response_code(500);
-    echo "No settings found in ./settings";
+    echo "No layers found";
     exit;
 }
 
 // Preload settings metadata for JS (zoom, tile_size).
 $settingsMeta = [];
-foreach ($settingsList as $s){
+foreach ($layers as $layer){
     try {
-        $data = load_settings($s['id']);
-        $settingsMeta[$s['id']] = [
-            'id' => $s['id'],
-            'label' => $s['label'],
+        $data = $layer['settings'];
+        $label = (string)$layer['label'];
+        if (($layer['owner_user_id'] ?? null) !== null){
+            $label .= ' (privé)';
+        } elseif (($layer['access'] ?? '') === 'premium'){
+            $label .= ' (premium)';
+        } elseif (($layer['access'] ?? '') === 'admin'){
+            $label .= ' (admin)';
+        }
+        $urlTemplate = (string)($data['url'] ?? '');
+        $layerName = (string)($data['layer'] ?? '');
+        $style = (string)($data['style'] ?? 'normal');
+        $ext = (string)($data['file_ext'] ?? 'png');
+        $format = 'image/' . $ext;
+        $previewUrl = str_replace(
+            ['{style}', '{layer}', '{format}', '{zoom}', '{col}', '{row}'],
+            [$style, $layerName, $format, '{z}', '{x}', '{y}'],
+            $urlTemplate
+        );
+        $hasCookieAuth = isset($data['cookies']) && is_array($data['cookies']) && count($data['cookies']) > 0;
+        $useProxyForPreview = $previewUrl === '' || $hasCookieAuth;
+        $settingsMeta[$layer['slug']] = [
+            'id' => (string)$layer['slug'],
+            'label' => $label,
             // `zoom` is the generation zoom (and default zoom for preview).
             'zoom' => (int)($data['zoom'] ?? 16),
             'leafletMinZoom' => (int)($data['leaflet_min_zoom'] ?? ($data['zoom'] ?? 0)),
             'leafletMaxZoom' => (int)($data['leaflet_max_zoom'] ?? ($data['zoom'] ?? 19)),
             'leafletDefaultZoom' => (int)($data['leaflet_default_zoom'] ?? ($data['zoom'] ?? 16)),
             'tileSize' => (int)(is_array($data['tile_size'] ?? null) ? ($data['tile_size'][0] ?? 256) : 256),
+            'previewUrl' => $previewUrl,
+            'useProxyForPreview' => $useProxyForPreview,
         ];
     } catch (Throwable $e){
         // Skip invalid settings in UI.
@@ -33,18 +85,11 @@ foreach ($settingsList as $s){
 
 $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
     ? 'opentopomap'
-    : (array_key_first($settingsMeta) ?: $settingsList[0]['id']);
+    : (array_key_first($settingsMeta) ?: (string)$layers[0]['slug']);
+
+$extraHeadHtml = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />';
+layout_header('Générateur de carte', $user, $extraHeadHtml);
 ?>
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Générateur de carte</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-    <link rel="stylesheet" href="assets/app.css" />
-</head>
-<body>
 <h2>Générer une carte PNG depuis des tuiles</h2>
 <div class="muted">Astuce: cliquez 2 fois pour définir le rectangle (NW puis SE). Un 3e clic réinitialise.</div>
 <div class="layout" style="margin-top: 0.75rem;">
@@ -58,10 +103,10 @@ $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
             <form method="post" action="generate.php" id="gen-form">
                 <label for="setting">Fond de carte / settings</label>
                 <select name="settings" id="setting">
-                    <?php foreach ($settingsList as $s): ?>
-                        <?php if (!isset($settingsMeta[$s['id']])){ continue; } ?>
-                        <option value="<?= htmlspecialchars($s['id'], ENT_QUOTES) ?>" <?= $s['id'] === $defaultSetting ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($s['label'], ENT_QUOTES) ?>
+                    <?php foreach ($layers as $layer): ?>
+                        <?php if (!isset($settingsMeta[$layer['slug']])){ continue; } ?>
+                        <option value="<?= htmlspecialchars((string)$layer['slug'], ENT_QUOTES) ?>" <?= (string)$layer['slug'] === $defaultSetting ? 'selected' : '' ?>>
+                            <?= htmlspecialchars((string)$settingsMeta[$layer['slug']]['label'], ENT_QUOTES) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -167,50 +212,50 @@ $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
         saveMapView(map);
     });
 
+    const settingIds = Object.keys(settingsMeta);
+    const minPreviewZoom = settingIds.reduce(function(acc, id){
+        return Math.min(acc, settingsMeta[id].leafletMinZoom);
+    }, 19);
+    const maxPreviewZoom = settingIds.reduce(function(acc, id){
+        return Math.max(acc, settingsMeta[id].leafletMaxZoom);
+    }, 0);
+    map.setMinZoom(minPreviewZoom);
+    map.setMaxZoom(maxPreviewZoom);
+
     const layersBySetting = {};
     const baseLayers = {};
-    Object.keys(settingsMeta).forEach(function(id){
+    settingIds.forEach(function(id){
         const s = settingsMeta[id];
-        const layer = L.tileLayer(`tile.php?setting=${encodeURIComponent(s.id)}&z={z}&x={x}&y={y}`, {
+        const tileUrl = s.useProxyForPreview
+            ? `tile.php?setting=${encodeURIComponent(s.id)}&z={z}&x={x}&y={y}`
+            : s.previewUrl;
+        const attribution = s.useProxyForPreview
+            ? 'Tiles proxifiees par le serveur'
+            : 'Tiles source directe';
+        const layer = L.tileLayer(tileUrl, {
             tileSize: s.tileSize || 256,
             minZoom: s.leafletMinZoom,
             maxZoom: s.leafletMaxZoom,
-            attribution: 'Tiles proxifiées par le serveur',
+            attribution: attribution,
         });
         layersBySetting[id] = layer;
         baseLayers[s.label || s.id] = layer;
     });
 
-    let activeSettingId = null;
-    function applySetting(settingId, opts){
-        opts = opts || {};
-        const s = settingsMeta[settingId];
+    function updateGenerationSettingUi(){
+        const s = currentSetting();
         if (!s){
+            zoomPill.textContent = 'Zoom: -';
             return;
         }
-
-        if (activeSettingId && layersBySetting[activeSettingId] && map.hasLayer(layersBySetting[activeSettingId])){
-            map.removeLayer(layersBySetting[activeSettingId]);
-        }
-        activeSettingId = settingId;
-        layersBySetting[settingId].addTo(map);
-
         zoomPill.textContent = `Zoom: ${s.leafletMinZoom} → ${s.leafletMaxZoom} (gen: ${s.zoom})`;
-        map.setMinZoom(s.leafletMinZoom);
-        map.setMaxZoom(s.leafletMaxZoom);
-
-        const currentZoom = map.getZoom();
-        const nextZoom = Math.min(
-            s.leafletMaxZoom,
-            Math.max(s.leafletMinZoom, isFinite(currentZoom) ? currentZoom : s.leafletDefaultZoom)
-        );
-
-        if (opts.forceZoom || currentZoom < s.leafletMinZoom || currentZoom > s.leafletMaxZoom){
-            map.setZoom(nextZoom);
-        }
     }
 
     const layerControl = L.control.layers(baseLayers, {}, { position: 'topright' }).addTo(map);
+    const initialPreviewLayer = layersBySetting[settingSelect.value] || layersBySetting[settingIds[0]];
+    if (initialPreviewLayer){
+        initialPreviewLayer.addTo(map);
+    }
 
     // Simple place search using Nominatim (OpenStreetMap)
     let searchMarker = null;
@@ -328,28 +373,41 @@ $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
     let drawnRect = null;
     let firstCorner = null;
     let secondCorner = null;
+    let pendingCorner = null;
     let bounds = [];
+
+    function clearSelection(){
+        if (drawnRect){ map.removeLayer(drawnRect); }
+        if (firstCorner){ map.removeLayer(firstCorner); }
+        if (secondCorner){ map.removeLayer(secondCorner); }
+        if (pendingCorner){ map.removeLayer(pendingCorner); }
+        drawnRect = null;
+        firstCorner = null;
+        secondCorner = null;
+        pendingCorner = null;
+        bounds = [];
+        document.querySelector('#latTopLeft').value = '';
+        document.querySelector('#lngTopLeft').value = '';
+        document.querySelector('#latBottomRight').value = '';
+        document.querySelector('#lngBottomRight').value = '';
+        document.querySelector('#coords').textContent = '(sélectionnez un rectangle)';
+        document.querySelector('#submit-btn').disabled = true;
+        tilesPill.textContent = 'Rectangle: non défini';
+    }
 
     function updateSelectionFromMarkers(){
         if (!firstCorner || !secondCorner){
             return;
         }
-        const a = firstCorner.getLatLng();
-        const b = secondCorner.getLatLng();
-        const lBounds = L.latLngBounds(a, b);
-
-        // Keep marker semantics stable: firstCorner = NW, secondCorner = SE.
+        const lBounds = L.latLngBounds(firstCorner.getLatLng(), secondCorner.getLatLng());
         firstCorner.setLatLng(lBounds.getNorthWest());
         secondCorner.setLatLng(lBounds.getSouthEast());
-
+        bounds = [lBounds.getNorthWest(), lBounds.getSouthEast()];
         if (drawnRect){
             drawnRect.setBounds(lBounds);
         } else {
-            drawnRect = L.rectangle(lBounds, {color: '#00ff78', weight: 1}).addTo(map);
+            drawnRect = L.rectangle(lBounds, { color: '#00ff78', weight: 1 }).addTo(map);
         }
-
-        // Keep `bounds` consistent with the rectangle corners.
-        bounds = [lBounds.getNorthWest(), lBounds.getSouthEast()];
         updateForm(lBounds);
     }
 
@@ -374,62 +432,74 @@ $defaultSetting = array_key_exists('opentopomap', $settingsMeta)
         tilesPill.textContent = 'Rectangle: OK';
     }
 
+    function createSelectionFromCorners(a, b){
+        const lBounds = L.latLngBounds(a, b);
+        if (pendingCorner){
+            map.removeLayer(pendingCorner);
+            pendingCorner = null;
+        }
+        if (drawnRect){ map.removeLayer(drawnRect); }
+        if (firstCorner){ map.removeLayer(firstCorner); }
+        if (secondCorner){ map.removeLayer(secondCorner); }
+        drawnRect = L.rectangle(lBounds, { color: '#00ff78', weight: 1 }).addTo(map);
+        firstCorner = L.marker(lBounds.getNorthWest(), { draggable: true }).addTo(map);
+        secondCorner = L.marker(lBounds.getSouthEast(), { draggable: true }).addTo(map);
+        firstCorner.on('drag', updateSelectionFromMarkers);
+        firstCorner.on('dragend', updateSelectionFromMarkers);
+        secondCorner.on('drag', updateSelectionFromMarkers);
+        secondCorner.on('dragend', updateSelectionFromMarkers);
+        updateSelectionFromMarkers();
+    }
+
     map.on('click', function(e) {
-        if (drawnRect) {
-            map.removeLayer(drawnRect);
-            map.removeLayer(firstCorner);
-            map.removeLayer(secondCorner);
-            bounds = [];
-            drawnRect = null;
-            firstCorner = null;
-            secondCorner = null;
-            document.querySelector('#coords').textContent = '(sélectionnez un rectangle)';
-            document.querySelector('#submit-btn').disabled = true;
-            tilesPill.textContent = 'Rectangle: non défini';
+        if (drawnRect){
+            clearSelection();
+            pendingCorner = L.marker(e.latlng, { draggable: false }).addTo(map);
+            tilesPill.textContent = 'Rectangle: 1 coin défini';
+            return;
         }
-
-        bounds.push(e.latlng);
-        if (bounds.length === 2){
-            const lBounds = L.latLngBounds(bounds[0], bounds[1]);
-            drawnRect = L.rectangle(lBounds, {color: '#00ff78', weight: 1}).addTo(map);
-            if (firstCorner){ map.removeLayer(firstCorner); }
-            firstCorner = L.marker(lBounds.getNorthWest(), { draggable: true }).addTo(map);
-            secondCorner = L.marker(lBounds.getSouthEast(), { draggable: true }).addTo(map);
-            firstCorner.on('drag', updateSelectionFromMarkers);
-            firstCorner.on('dragend', updateSelectionFromMarkers);
-            secondCorner.on('drag', updateSelectionFromMarkers);
-            secondCorner.on('dragend', updateSelectionFromMarkers);
-            updateForm(lBounds);
+        if (!pendingCorner){
+            pendingCorner = L.marker(e.latlng, { draggable: false }).addTo(map);
+            tilesPill.textContent = 'Rectangle: 1 coin défini';
+            return;
         }
-
-        if (bounds.length === 1){
-            firstCorner = L.marker(bounds[0], { draggable: true }).addTo(map);
-        }
+        createSelectionFromCorners(pendingCorner.getLatLng(), e.latlng);
     });
 
     settingSelect.addEventListener('change', function(){
-        applySetting(settingSelect.value, { forceZoom: false });
+        updateGenerationSettingUi();
         if (bounds.length === 2){
             updateForm(L.latLngBounds(bounds[0], bounds[1]));
         }
     });
 
-    map.on('baselayerchange', function(e){
-        // Sync dropdown with layer control selection.
-        const nextId = Object.keys(layersBySetting).find(id => layersBySetting[id] === e.layer);
-        if (!nextId){
+    function tryRestoreFromQuery(){
+        const params = new URLSearchParams(window.location.search || '');
+        const requestedSetting = (params.get('settings') || '').trim();
+        if (requestedSetting && settingsMeta[requestedSetting]){
+            settingSelect.value = requestedSetting;
+        }
+
+        const latTopLeft = parseFloat(params.get('latTopLeft') || '');
+        const lngTopLeft = parseFloat(params.get('lngTopLeft') || '');
+        const latBottomRight = parseFloat(params.get('latBottomRight') || '');
+        const lngBottomRight = parseFloat(params.get('lngBottomRight') || '');
+        if (![latTopLeft, lngTopLeft, latBottomRight, lngBottomRight].every(Number.isFinite)){
             return;
         }
-        if (settingSelect.value !== nextId){
-            settingSelect.value = nextId;
+        if (latTopLeft < -90 || latTopLeft > 90 || latBottomRight < -90 || latBottomRight > 90){
+            return;
         }
-        applySetting(nextId, { forceZoom: false });
-        if (bounds.length === 2){
-            updateForm(L.latLngBounds(bounds[0], bounds[1]));
+        if (lngTopLeft < -180 || lngTopLeft > 180 || lngBottomRight < -180 || lngBottomRight > 180){
+            return;
         }
-    });
 
-    applySetting(settingSelect.value, { forceZoom: true });
+        const lBounds = L.latLngBounds([latTopLeft, lngTopLeft], [latBottomRight, lngBottomRight]);
+        createSelectionFromCorners(lBounds.getNorthWest(), lBounds.getSouthEast());
+        map.fitBounds(lBounds, { padding: [20, 20] });
+    }
+
+    updateGenerationSettingUi();
+    tryRestoreFromQuery();
 </script>
-</body>
-</html>
+<?php layout_footer(); ?>

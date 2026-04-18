@@ -2,7 +2,14 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/lib/app.php';
+require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/settings.php';
+require_once __DIR__ . '/lib/layers.php';
+require_once __DIR__ . '/lib/layout.php';
+
+app_boot();
+$user = auth_require_login();
 
 function jobs_root(): string {
     return __DIR__ . '/var/jobs';
@@ -78,9 +85,12 @@ $jobId = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST'){
     $settingsId = normalize_settings_id((string)($_POST['settings'] ?? ''));
-    if ($settingsId === '' || find_settings_file($settingsId) === null){
-        http_response_code(400);
-        echo "Unknown settings";
+    try {
+        // Enforce access (public/premium/admin/private).
+        layers_load_settings_for_user($settingsId, $user);
+    } catch (Throwable $e){
+        http_response_code(403);
+        echo "Forbidden";
         exit;
     }
 
@@ -110,84 +120,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
         exit;
     }
 }
+layout_header('Génération…', $user);
 ?>
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Génération…</title>
-    <style>
-        body{
-            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
-            background: #f0f0f0;
-            padding: 1rem;
-            margin: 0;
-        }
-        .card{
-            max-width: 860px;
-            margin: 0 auto;
-            background: #fff;
-            border: 1px solid rgba(0,0,0,0.12);
-            border-radius: 12px;
-            box-shadow: 0 10px 28px rgba(0,0,0,0.10);
-            padding: 1rem;
-        }
-        .row{
-            display: flex;
-            gap: 0.75rem;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .bar{
-            width: 100%;
-            height: 12px;
-            background: rgba(0,0,0,0.08);
-            border-radius: 999px;
-            overflow: hidden;
-        }
-        .bar > div{
-            height: 100%;
-            width: 0%;
-            background: #00a86b;
-            transition: width 0.2s linear;
-        }
-        .muted{ opacity: 0.75; }
-        .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-        a.btn{
-            display: inline-block;
-            padding: 0.6rem 0.85rem;
-            border-radius: 10px;
-            background: #111;
-            color: #fff;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        img{
-            max-width: 100%;
-            border-radius: 10px;
-            border: 1px solid rgba(0,0,0,0.10);
-            margin-top: 0.75rem;
-        }
-        pre{
-            background: rgba(0,0,0,0.04);
-            padding: 0.75rem;
-            border-radius: 10px;
-            overflow: auto;
-        }
-    </style>
-</head>
-<body>
-<div class="card">
+<div class="card" style="max-width: 860px; margin: 0 auto;">
     <div class="row">
         <h2 style="margin: 0;">Génération en cours</h2>
-        <span class="muted mono" id="job-id"></span>
+        <span class="muted" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;" id="job-id"></span>
     </div>
     <div class="muted" id="status-msg" style="margin-top: 0.5rem;">Initialisation…</div>
-    <div class="bar" style="margin-top: 0.75rem;"><div id="bar-inner"></div></div>
+    <div class="bar" style="margin-top: 0.75rem; width: 100%; height: 12px; background: rgba(0,0,0,0.08); border-radius: 999px; overflow: hidden;">
+        <div id="bar-inner" style="height:100%; width:0%; background:#00a86b; transition: width 0.2s linear;"></div>
+    </div>
     <div class="row muted" style="margin-top: 0.5rem;">
-        <span class="mono" id="progress-text">0/0</span>
-        <span class="mono" id="percent-text">0%</span>
+        <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;" id="progress-text">0/0</span>
+        <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;" id="percent-text">0%</span>
     </div>
 
     <div id="done-block" style="display:none; margin-top: 0.75rem;">
@@ -195,8 +141,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
             <a class="btn" href="index.php">Nouvelle génération</a>
             <a class="btn" id="download-png-link" href="#">Télécharger PNG</a>
             <a class="btn" id="download-jpg-link" href="#">Télécharger JPG</a>
+            <a class="btn" id="download-pgw-link" href="#">Télécharger PGW</a>
+            <a class="btn" id="download-omap-link" href="#">Télécharger OMAP + KMZ (ZIP)</a>
             <a class="btn" id="download-gpx-link" href="#">Télécharger GPX</a>
             <a class="btn" id="download-kmz-link" href="#">Télécharger KMZ</a>
+            <a class="btn" id="edit-link" href="#">Changer de layer</a>
         </div>
         <div id="meta-block" style="display:none; margin-top: 0.75rem;">
             <div class="muted">Centre (WGS84)</div>
@@ -206,12 +155,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
             <div class="muted" style="margin-top: 0.5rem;">Déclinaison magnétique (WMM2025) au centre</div>
             <div class="mono" id="decl-text"></div>
         </div>
-        <img id="result-img" alt="Résultat"/>
+        <img id="result-img" alt="Résultat" style="max-width:100%; border-radius:10px; border:1px solid rgba(0,0,0,0.10); margin-top:0.75rem;"/>
     </div>
 
     <div id="error-block" style="display:none; margin-top: 0.75rem;">
         <h3 style="margin: 0.25rem 0;">Erreur</h3>
-        <pre id="error-pre"></pre>
+        <pre id="error-pre" style="background: rgba(0,0,0,0.04); padding: 0.75rem; border-radius: 10px; overflow: auto;"></pre>
         <div class="row">
             <a class="btn" href="index.php">Retour</a>
         </div>
@@ -232,8 +181,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
     const resultImg = document.querySelector('#result-img');
     const downloadPngLink = document.querySelector('#download-png-link');
     const downloadJpgLink = document.querySelector('#download-jpg-link');
+    const downloadPgwLink = document.querySelector('#download-pgw-link');
+    const downloadOmapLink = document.querySelector('#download-omap-link');
     const downloadGpxLink = document.querySelector('#download-gpx-link');
     const downloadKmzLink = document.querySelector('#download-kmz-link');
+    const editLink = document.querySelector('#edit-link');
     const metaBlock = document.querySelector('#meta-block');
     const centerText = document.querySelector('#center-text');
     const utmText = document.querySelector('#utm-text');
@@ -274,13 +226,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
                 const pngUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&t=${Date.now()}`;
                 const pngDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&download=1&t=${Date.now()}`;
                 const jpgDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=jpg&download=1&t=${Date.now()}`;
+                const pgwDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=pgw&download=1&t=${Date.now()}`;
+                const omapDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=omap&download=1&t=${Date.now()}`;
                 const gpxDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=gpx&download=1&t=${Date.now()}`;
                 const kmzDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=kmz&download=1&t=${Date.now()}`;
                 resultImg.src = pngUrl;
                 downloadPngLink.href = pngDlUrl;
                 downloadJpgLink.href = jpgDlUrl;
+                downloadPgwLink.href = pgwDlUrl;
+                downloadOmapLink.href = omapDlUrl;
                 downloadGpxLink.href = gpxDlUrl;
                 downloadKmzLink.href = kmzDlUrl;
+
+                if (json.input){
+                    const q = new URLSearchParams();
+                    if (json.input.settings){ q.set('settings', String(json.input.settings)); }
+                    if (json.input.latTopLeft != null){ q.set('latTopLeft', String(json.input.latTopLeft)); }
+                    if (json.input.lngTopLeft != null){ q.set('lngTopLeft', String(json.input.lngTopLeft)); }
+                    if (json.input.latBottomRight != null){ q.set('latBottomRight', String(json.input.latBottomRight)); }
+                    if (json.input.lngBottomRight != null){ q.set('lngBottomRight', String(json.input.lngBottomRight)); }
+                    editLink.href = `index.php?${q.toString()}`;
+                } else {
+                    editLink.href = 'index.php';
+                }
 
                 if (json.meta && json.meta.center && json.meta.utm && json.meta.magnetic && typeof json.meta.magnetic.declinationDeg === 'number'){
                     metaBlock.style.display = 'block';
@@ -313,5 +281,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
 
     poll();
 </script>
-</body>
-</html>
+<?php layout_footer(); ?>

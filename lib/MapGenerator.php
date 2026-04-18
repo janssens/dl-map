@@ -141,7 +141,7 @@ final class MapGenerator {
 
                 if (!$fromCache){
                     $code = check200($tileUrl, $this->cookiesHeader);
-                    if ($code !== 200){
+                    if (!is_success_tile_http_code($code)){
                         $this->tilesDone++;
                         $this->emitProgress("HTTP $code (skip)", $this->tilesDone, $this->tilesTotal);
                         continue;
@@ -190,8 +190,6 @@ final class MapGenerator {
                 $this->emitProgress($msg, $this->tilesDone, $this->tilesTotal);
             }
         }
-
-        imagealphablending($im, false);
     }
 
     private static function getNeededMemoryForImageCreate(int $width, int $height): float {
@@ -316,6 +314,11 @@ final class MapGenerator {
         if ($im === false){
             throw new RuntimeException("Cannot Initialize new GD image stream");
         }
+        imagealphablending($im, false);
+        imagesavealpha($im, true);
+        $transparent = imagecolorallocatealpha($im, 0, 0, 0, 127);
+        imagefilledrectangle($im, 0, 0, $width, $height, $transparent);
+        imagealphablending($im, true);
 
         foreach ($this->generatedParts as $part){
             $src = @imagecreatefrompng($part['path']);
@@ -332,6 +335,7 @@ final class MapGenerator {
         }
 
         imagealphablending($im, false);
+        imagesavealpha($im, true);
         imagepng($im, $finalPath);
         imagedestroy($im);
 
@@ -379,10 +383,17 @@ final class MapGenerator {
         if ($im === false){
             throw new RuntimeException("Cannot Initialize new GD image stream");
         }
+        imagealphablending($im, false);
+        imagesavealpha($im, true);
+        $transparent = imagecolorallocatealpha($im, 0, 0, 0, 127);
+        imagefilledrectangle($im, 0, 0, $width, $height, $transparent);
+        imagealphablending($im, true);
 
         $this->generateImg($im, $colmin, $colmax, $rowmin, $rowmax);
 
         $partPath = $this->outputDir . '/' . $this->layer . $colmin . '-' . $colmax . '_' . $rowmin . '-' . $rowmax . '.png';
+        imagealphablending($im, false);
+        imagesavealpha($im, true);
         imagepng($im, $partPath);
         imagedestroy($im);
 
