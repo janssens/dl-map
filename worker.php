@@ -176,7 +176,7 @@ function build_4corners_gpx(array $tileBounds): string {
 
     $out = [];
     $out[] = '<?xml version="1.0" encoding="UTF-8"?>';
-    $out[] = '<gpx version="1.1" creator="dl-map" xmlns="http://www.topografix.com/GPX/1/1">';
+    $out[] = '<gpx version="1.1" creator="Casse dalles" xmlns="http://www.topografix.com/GPX/1/1">';
     foreach ($wpts as $w){
         $out[] = sprintf(
             '  <wpt lat="%s" lon="%s"><name>%s</name></wpt>',

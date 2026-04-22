@@ -13,7 +13,7 @@ $user = auth_current_user();
 $extraHeadHtml = '';
 
 if (!$user){
-    layout_header("dl-map", null);
+    layout_header("Casse dalles", null);
     ?>
     <div class="card">
         <h2 style="margin-top:0;">Générer une carte PNG depuis des tuiles</h2>
@@ -40,6 +40,8 @@ if (count($layers) === 0){
     echo "No layers found";
     exit;
 }
+
+$jobLimitError = ((string)($_GET['error'] ?? '') === 'job_limit');
 
 // Preload settings metadata for JS (zoom, tile_size).
 $settingsMeta = [];
@@ -69,6 +71,7 @@ foreach ($layers as $layer){
         $settingsMeta[$layer['slug']] = [
             'id' => (string)$layer['slug'],
             'label' => $label,
+            'allowed' => (bool)($layer['allowed'] ?? false),
             // `zoom` is the generation zoom (and default zoom for preview).
             'zoom' => (int)($data['zoom'] ?? 16),
             'leafletMinZoom' => (int)($data['leaflet_min_zoom'] ?? ($data['zoom'] ?? 0)),
@@ -83,13 +86,33 @@ foreach ($layers as $layer){
     }
 }
 
-$defaultSetting = array_key_exists('opentopomap', $settingsMeta)
-    ? 'opentopomap'
-    : (array_key_first($settingsMeta) ?: (string)$layers[0]['slug']);
+$defaultSetting = null;
+if (array_key_exists('opentopomap', $settingsMeta) && !empty($settingsMeta['opentopomap']['allowed'])){
+    $defaultSetting = 'opentopomap';
+}
+if ($defaultSetting === null){
+    foreach ($settingsMeta as $id => $meta){
+        if (!empty($meta['allowed'])){
+            $defaultSetting = (string)$id;
+            break;
+        }
+    }
+}
+if ($defaultSetting === null){
+    $defaultSetting = (array_key_first($settingsMeta) ?: (string)$layers[0]['slug']);
+}
 
-$extraHeadHtml = '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />';
+$extraHeadHtml = '<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css" />';
 layout_header('Générateur de carte', $user, $extraHeadHtml);
 ?>
+<?php if ($jobLimitError): ?>
+    <div class="error" style="margin-bottom: 0.75rem;">
+        Vous avez atteint le nombre de génération maximal pour le compte gratuit, supprimez des résultat si vous voulez en créer de nouveau.
+        <div style="margin-top:0.5rem;">
+            <a class="btn secondary" href="/jobs.php">Ouvrir mes jobs</a>
+        </div>
+    </div>
+<?php endif; ?>
 <h2>Générer une carte PNG depuis des tuiles</h2>
 <div class="muted">Astuce: cliquez 2 fois pour définir le rectangle (NW puis SE). Un 3e clic réinitialise.</div>
 <div class="layout" style="margin-top: 0.75rem;">
@@ -105,7 +128,7 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
                 <select name="settings" id="setting">
                     <?php foreach ($layers as $layer): ?>
                         <?php if (!isset($settingsMeta[$layer['slug']])){ continue; } ?>
-                        <option value="<?= htmlspecialchars((string)$layer['slug'], ENT_QUOTES) ?>" <?= (string)$layer['slug'] === $defaultSetting ? 'selected' : '' ?>>
+                        <option value="<?= htmlspecialchars((string)$layer['slug'], ENT_QUOTES) ?>" <?= (string)$layer['slug'] === $defaultSetting ? 'selected' : '' ?> <?= empty($layer['allowed']) ? 'disabled' : '' ?>>
                             <?= htmlspecialchars((string)$settingsMeta[$layer['slug']]['label'], ENT_QUOTES) ?>
                         </option>
                     <?php endforeach; ?>
@@ -114,6 +137,7 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
                 <div style="margin-top: 0.8rem;" class="row">
                     <span class="pill" id="zoom-pill"></span>
                     <span class="pill" id="tiles-pill">Rectangle: non défini</span>
+                    <span class="pill" id="access-pill" style="display:none;"></span>
                 </div>
 
                 <div style="margin-top: 0.8rem;">
@@ -137,12 +161,14 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
     </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script src="/assets/vendor/leaflet/leaflet.js"></script>
 <script>
     const settingsMeta = <?php echo json_encode($settingsMeta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
     const settingSelect = document.querySelector('#setting');
     const zoomPill = document.querySelector('#zoom-pill');
     const tilesPill = document.querySelector('#tiles-pill');
+    const accessPill = document.querySelector('#access-pill');
+    const submitBtn = document.querySelector('#submit-btn');
 
     function currentSetting(){
         const id = settingSelect.value;
@@ -249,6 +275,18 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
             return;
         }
         zoomPill.textContent = `Zoom: ${s.leafletMinZoom} → ${s.leafletMaxZoom} (gen: ${s.zoom})`;
+        if (!s.allowed){
+            accessPill.style.display = 'inline-block';
+            accessPill.textContent = 'Compte premium requis';
+            submitBtn.disabled = true;
+        } else {
+            accessPill.style.display = 'none';
+            accessPill.textContent = '';
+            // Submit button is enabled only when rectangle is selected.
+            if (bounds.length === 2){
+                submitBtn.disabled = false;
+            }
+        }
     }
 
     const layerControl = L.control.layers(baseLayers, {}, { position: 'topright' }).addTo(map);
@@ -391,7 +429,7 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
         document.querySelector('#latBottomRight').value = '';
         document.querySelector('#lngBottomRight').value = '';
         document.querySelector('#coords').textContent = '(sélectionnez un rectangle)';
-        document.querySelector('#submit-btn').disabled = true;
+        submitBtn.disabled = true;
         tilesPill.textContent = 'Rectangle: non défini';
     }
 
@@ -428,7 +466,8 @@ layout_header('Générateur de carte', $user, $extraHeadHtml);
             settings: settingSelect.value
         }, null, 2);
 
-        document.querySelector('#submit-btn').disabled = false;
+        const s = currentSetting();
+        submitBtn.disabled = !s || !s.allowed;
         tilesPill.textContent = 'Rectangle: OK';
     }
 

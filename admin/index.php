@@ -16,8 +16,8 @@ layout_header('Admin', $user);
     <div class="row" style="margin-top:0.75rem;">
         <a class="btn" href="users.php">Utilisateurs</a>
         <a class="btn" href="layers.php">Layers</a>
+        <a class="btn" href="jobs.php">Jobs</a>
     </div>
 </div>
 <?php
 layout_footer();
-

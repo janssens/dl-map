@@ -7,29 +7,18 @@ require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/settings.php';
 require_once __DIR__ . '/lib/layers.php';
 require_once __DIR__ . '/lib/layout.php';
+require_once __DIR__ . '/lib/jobs.php';
 
 app_boot();
 $user = auth_require_login();
 
-function jobs_root(): string {
-    return __DIR__ . '/var/jobs';
-}
-
-function job_dir(string $jobId): string {
-    return jobs_root() . '/' . $jobId;
-}
-
-function is_valid_job_id(string $jobId): bool {
-    return (bool)preg_match('/^[a-f0-9]{16,64}$/', $jobId);
-}
-
-function start_job(array $input): string {
+function start_job(array $input, array $user, ?string $sourceJobId = null): string {
     if (!is_dir(jobs_root())){
         mkdir(jobs_root(), 0777, true);
     }
 
     $jobId = bin2hex(random_bytes(12));
-    $dir = job_dir($jobId);
+    $dir = jobs_job_dir($jobId);
     mkdir($dir, 0777, true);
 
     file_put_contents($dir . '/input.json', json_encode($input, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
@@ -70,6 +59,8 @@ function start_job(array $input): string {
         throw new RuntimeException('Cannot find a PHP binary to start worker');
     }
 
+    jobs_insert($jobId, $user, (string)($input['settings'] ?? ''), $sourceJobId, (string)($input['createdAt'] ?? ''));
+
     $php = escapeshellarg($php);
     $worker = escapeshellarg(__DIR__ . '/worker.php');
     $arg = escapeshellarg($jobId);
@@ -84,6 +75,12 @@ function start_job(array $input): string {
 $jobId = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST'){
+    $limit = jobs_user_job_limit($user);
+    if ($limit !== null && jobs_count_active_for_user($user) >= $limit){
+        header('Location: index.php?error=job_limit');
+        exit;
+    }
+
     $settingsId = normalize_settings_id((string)($_POST['settings'] ?? ''));
     try {
         // Enforce access (public/premium/admin/private).
@@ -112,10 +109,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'){
         'lngBottomRight' => $lngBottomRight,
         'settings' => $settingsId,
         'createdAt' => date('c'),
-    ]);
+    ], $user);
 } else {
+    $reloadFrom = (string)($_GET['reload'] ?? '');
+    if ($reloadFrom !== ''){
+        $limit = jobs_user_job_limit($user);
+        if ($limit !== null && jobs_count_active_for_user($user) >= $limit){
+            header('Location: index.php?error=job_limit');
+            exit;
+        }
+        if (!jobs_is_valid_job_id($reloadFrom)){
+            header('Location: index.php');
+            exit;
+        }
+        try {
+            $row = jobs_load_row($reloadFrom);
+            if (!empty($row['deleted_at'])){
+                throw new RuntimeException('Not found');
+            }
+            if (!auth_is_admin($user) && (int)($row['user_id'] ?? 0) !== (int)($user['id'] ?? 0)){
+                throw new RuntimeException('Forbidden');
+            }
+        } catch (Throwable $e){
+            header('Location: index.php');
+            exit;
+        }
+        $inputPath = jobs_job_dir($reloadFrom) . '/input.json';
+        if (!is_file($inputPath)){
+            header('Location: index.php');
+            exit;
+        }
+        $raw = file_get_contents($inputPath);
+        $input = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($input)){
+            header('Location: index.php');
+            exit;
+        }
+        $settingsId = normalize_settings_id((string)($input['settings'] ?? ''));
+        try {
+            layers_load_settings_for_user($settingsId, $user);
+        } catch (Throwable $e){
+            header('Location: index.php');
+            exit;
+        }
+        $input['createdAt'] = date('c');
+        $input['sourceJobId'] = $reloadFrom;
+        $newId = start_job($input, $user, $reloadFrom);
+        header('Location: generate.php?job=' . urlencode($newId));
+        exit;
+    }
+
     $jobId = (string)($_GET['job'] ?? '');
-    if (!is_valid_job_id($jobId)){
+    if (!jobs_is_valid_job_id($jobId)){
+        header('Location: index.php');
+        exit;
+    }
+    try {
+        $row = jobs_load_row($jobId);
+        if (!empty($row['deleted_at'])){
+            throw new RuntimeException('Not found');
+        }
+        if (!auth_is_admin($user) && (int)($row['user_id'] ?? 0) !== (int)($user['id'] ?? 0)){
+            throw new RuntimeException('Forbidden');
+        }
+    } catch (Throwable $e){
         header('Location: index.php');
         exit;
     }
@@ -138,14 +195,14 @@ layout_header('Génération…', $user);
 
     <div id="done-block" style="display:none; margin-top: 0.75rem;">
         <div class="row">
-            <a class="btn" href="index.php">Nouvelle génération</a>
-            <a class="btn" id="download-png-link" href="#">Télécharger PNG</a>
-            <a class="btn" id="download-jpg-link" href="#">Télécharger JPG</a>
-            <a class="btn" id="download-pgw-link" href="#">Télécharger PGW</a>
-            <a class="btn" id="download-omap-link" href="#">Télécharger OMAP + KMZ (ZIP)</a>
-            <a class="btn" id="download-gpx-link" href="#">Télécharger GPX</a>
-            <a class="btn" id="download-kmz-link" href="#">Télécharger KMZ</a>
-            <a class="btn" id="edit-link" href="#">Changer de layer</a>
+            <a class="btn black" href="index.php"><span class="btn-ico"><?= layout_svg_icon('arrow-left') ?></span>Nouvelle génération</a>
+            <a class="btn orange" id="reload-link" href="#"><span class="btn-ico"><?= layout_svg_icon('refresh') ?></span>Relancer</a>
+            <a class="btn blue" id="download-png-link" href="#"><span class="btn-ico"><?= layout_svg_icon('download') ?></span>Télécharger PNG</a>
+            <a class="btn blue" id="download-jpg-link" href="#"><span class="btn-ico"><?= layout_svg_icon('download') ?></span>Télécharger JPG</a>
+            <a class="btn blue" id="download-omap-link" href="#"><span class="btn-ico"><?= layout_svg_icon('download') ?></span>Télécharger OMAP + KMZ (ZIP)</a>
+            <a class="btn blue" id="download-gpx-link" href="#"><span class="btn-ico"><?= layout_svg_icon('download') ?></span>Télécharger GPX des 4 coins</a>
+            <a class="btn blue" id="download-kmz-link" href="#"><span class="btn-ico"><?= layout_svg_icon('download') ?></span>Télécharger KMZ</a>
+            <a class="btn orange" id="edit-link" href="#"><span class="btn-ico"><?= layout_svg_icon('swap') ?></span>Changer de layer</a>
         </div>
         <div id="meta-block" style="display:none; margin-top: 0.75rem;">
             <div class="muted">Centre (WGS84)</div>
@@ -162,7 +219,7 @@ layout_header('Génération…', $user);
         <h3 style="margin: 0.25rem 0;">Erreur</h3>
         <pre id="error-pre" style="background: rgba(0,0,0,0.04); padding: 0.75rem; border-radius: 10px; overflow: auto;"></pre>
         <div class="row">
-            <a class="btn" href="index.php">Retour</a>
+            <a class="btn orange" id="error-back-link" href="#"><span class="btn-ico"><?= layout_svg_icon('swap') ?></span>Retour</a>
         </div>
     </div>
 </div>
@@ -181,11 +238,12 @@ layout_header('Génération…', $user);
     const resultImg = document.querySelector('#result-img');
     const downloadPngLink = document.querySelector('#download-png-link');
     const downloadJpgLink = document.querySelector('#download-jpg-link');
-    const downloadPgwLink = document.querySelector('#download-pgw-link');
     const downloadOmapLink = document.querySelector('#download-omap-link');
     const downloadGpxLink = document.querySelector('#download-gpx-link');
     const downloadKmzLink = document.querySelector('#download-kmz-link');
     const editLink = document.querySelector('#edit-link');
+    const reloadLink = document.querySelector('#reload-link');
+    const errorBackLink = document.querySelector('#error-back-link');
     const metaBlock = document.querySelector('#meta-block');
     const centerText = document.querySelector('#center-text');
     const utmText = document.querySelector('#utm-text');
@@ -226,17 +284,16 @@ layout_header('Génération…', $user);
                 const pngUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&t=${Date.now()}`;
                 const pngDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=png&download=1&t=${Date.now()}`;
                 const jpgDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=jpg&download=1&t=${Date.now()}`;
-                const pgwDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=pgw&download=1&t=${Date.now()}`;
                 const omapDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=omap&download=1&t=${Date.now()}`;
                 const gpxDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=gpx&download=1&t=${Date.now()}`;
                 const kmzDlUrl = `result.php?job=${encodeURIComponent(jobId)}&format=kmz&download=1&t=${Date.now()}`;
                 resultImg.src = pngUrl;
                 downloadPngLink.href = pngDlUrl;
                 downloadJpgLink.href = jpgDlUrl;
-                downloadPgwLink.href = pgwDlUrl;
                 downloadOmapLink.href = omapDlUrl;
                 downloadGpxLink.href = gpxDlUrl;
                 downloadKmzLink.href = kmzDlUrl;
+                reloadLink.href = `generate.php?reload=${encodeURIComponent(jobId)}`;
 
                 if (json.input){
                     const q = new URLSearchParams();
@@ -245,9 +302,12 @@ layout_header('Génération…', $user);
                     if (json.input.lngTopLeft != null){ q.set('lngTopLeft', String(json.input.lngTopLeft)); }
                     if (json.input.latBottomRight != null){ q.set('latBottomRight', String(json.input.latBottomRight)); }
                     if (json.input.lngBottomRight != null){ q.set('lngBottomRight', String(json.input.lngBottomRight)); }
-                    editLink.href = `index.php?${q.toString()}`;
+                    const backHref = `index.php?${q.toString()}`;
+                    editLink.href = backHref;
+                    errorBackLink.href = backHref;
                 } else {
                     editLink.href = 'index.php';
+                    errorBackLink.href = 'index.php';
                 }
 
                 if (json.meta && json.meta.center && json.meta.utm && json.meta.magnetic && typeof json.meta.magnetic.declinationDeg === 'number'){
@@ -269,6 +329,17 @@ layout_header('Génération…', $user);
             if (json.state === 'error'){
                 errorBlock.style.display = 'block';
                 errorPre.textContent = json.error || 'Unknown error';
+                if (json.input){
+                    const q = new URLSearchParams();
+                    if (json.input.settings){ q.set('settings', String(json.input.settings)); }
+                    if (json.input.latTopLeft != null){ q.set('latTopLeft', String(json.input.latTopLeft)); }
+                    if (json.input.lngTopLeft != null){ q.set('lngTopLeft', String(json.input.lngTopLeft)); }
+                    if (json.input.latBottomRight != null){ q.set('latBottomRight', String(json.input.latBottomRight)); }
+                    if (json.input.lngBottomRight != null){ q.set('lngBottomRight', String(json.input.lngBottomRight)); }
+                    errorBackLink.href = `index.php?${q.toString()}`;
+                } else {
+                    errorBackLink.href = 'index.php';
+                }
                 return;
             }
 

@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/app.php';
 require_once __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/jobs.php';
 
-app_boot_no_migrate();
-if (!is_file(app_db_path())){
-    db_migrate();
-}
+app_boot();
 $user = auth_current_user();
 if (!$user){
     http_response_code(401);
@@ -18,16 +16,8 @@ if (!$user){
     exit;
 }
 
-function jobs_root(): string {
-    return __DIR__ . '/var/jobs';
-}
-
-function is_valid_job_id(string $jobId): bool {
-    return (bool)preg_match('/^[a-f0-9]{16,64}$/', $jobId);
-}
-
 function safe_job_input(string $jobId): ?array {
-    $path = jobs_root() . '/' . $jobId . '/input.json';
+    $path = jobs_job_dir($jobId) . '/input.json';
     if (!is_file($path)){
         return null;
     }
@@ -59,13 +49,28 @@ $jobId = (string)($_GET['job'] ?? '');
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-if (!is_valid_job_id($jobId)){
+if (!jobs_is_valid_job_id($jobId)){
     http_response_code(400);
     echo json_encode(['state' => 'error', 'error' => 'Invalid job id']);
     exit;
 }
+try {
+    $row = jobs_load_row($jobId);
+    if (!empty($row['deleted_at'])){
+        throw new RuntimeException('Not found');
+    }
+    if (!auth_is_admin($user) && (int)($row['user_id'] ?? 0) !== (int)($user['id'] ?? 0)){
+        http_response_code(403);
+        echo json_encode(['state' => 'error', 'error' => 'Forbidden']);
+        exit;
+    }
+} catch (Throwable $e){
+    http_response_code(404);
+    echo json_encode(['state' => 'error', 'error' => 'Not found']);
+    exit;
+}
 
-$statusPath = jobs_root() . '/' . $jobId . '/status.json';
+$statusPath = jobs_job_dir($jobId) . '/status.json';
 if (!is_file($statusPath)){
     echo json_encode([
         'state' => 'starting',

@@ -22,7 +22,9 @@ function layer_access_allows(string $access, ?array $user): bool {
 }
 
 /**
- * @return array<int, array{id:int,slug:string,label:string,settings:array,access:string,owner_user_id:int|null}>
+ * Returns all visible layers for a user. Some layers can be visible but not selectable (allowed=false).
+ *
+ * @return array<int, array{id:int,slug:string,label:string,settings:array,access:string,owner_user_id:int|null,allowed:bool}>
  */
 function layers_list_for_user(?array $user): array {
     $pdo = db();
@@ -30,12 +32,11 @@ function layers_list_for_user(?array $user): array {
     $where = [];
 
     // Global layers.
-    if (!is_array($user) || ($user['tier'] ?? 'free') === 'free'){
-        $where[] = '(owner_user_id IS NULL AND access = \'public\')';
-    } elseif (($user['tier'] ?? '') === 'premium'){
+    if (!is_array($user) || !auth_is_admin($user)){
+        // Free/premium users can see public + premium layers (premium can be disabled for free users).
         $where[] = '(owner_user_id IS NULL AND access IN (\'public\', \'premium\'))';
     } else {
-        // admin
+        // Admin can see all global layers.
         $where[] = '(owner_user_id IS NULL)';
     }
 
@@ -55,13 +56,21 @@ function layers_list_for_user(?array $user): array {
         if (!is_array($settings)){
             continue;
         }
+        $allowed = true;
+        $ownerId = $row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null;
+        if ($ownerId !== null){
+            $allowed = is_array($user) && (int)($user['id'] ?? 0) === $ownerId;
+        } else {
+            $allowed = layer_access_allows((string)$row['access'], $user);
+        }
         $out[] = [
             'id' => (int)$row['id'],
             'slug' => (string)$row['slug'],
             'label' => (string)$row['label'],
             'settings' => $settings,
             'access' => (string)$row['access'],
-            'owner_user_id' => $row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null,
+            'owner_user_id' => $ownerId,
+            'allowed' => $allowed,
         ];
     }
     return $out;

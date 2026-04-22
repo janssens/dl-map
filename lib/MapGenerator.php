@@ -133,21 +133,46 @@ final class MapGenerator {
             mkdir(tile_cache_dir_path(), 0777, true);
         }
 
+        // Prefetch missing tiles in parallel (then compose sequentially with GD).
+        $downloadConcurrency = (int)($this->settings['download_concurrency'] ?? 8);
+        $downloadConcurrency = max(1, min(32, $downloadConcurrency));
+
+        /** @var array<string, array{url:string,path:string}> $missingByPath */
+        $missingByPath = [];
         for ($col = $colmin; $col <= $colmax; $col++){
             for ($row = $rowmin; $row <= $rowmax; $row++){
                 $tilePath = tile_cache_path($this->settings, $this->zoom, $col, $row);
-                $fromCache = file_exists($tilePath);
-                $tileUrl = build_remote_tile_url($this->settings, $this->zoom, $col, $row);
-
-                if (!$fromCache){
-                    $code = check200($tileUrl, $this->cookiesHeader);
-                    if (!is_success_tile_http_code($code)){
-                        $this->tilesDone++;
-                        $this->emitProgress("HTTP $code (skip)", $this->tilesDone, $this->tilesTotal);
-                        continue;
-                    }
-                    save_img($tilePath, $tileUrl, $this->cookiesHeader);
+                if (file_exists($tilePath)){
+                    continue;
                 }
+                $missingByPath[$tilePath] = [
+                    'url' => build_remote_tile_url($this->settings, $this->zoom, $col, $row),
+                    'path' => $tilePath,
+                ];
+            }
+        }
+
+        /** @var array<string, array{ok:bool,httpCode:int,error:string}> $downloadResults */
+        $downloadResults = [];
+        if (count($missingByPath) > 0){
+            $this->emitProgress('Téléchargement des tuiles…');
+            $downloadResults = download_tiles_parallel(array_values($missingByPath), $downloadConcurrency, $this->cookiesHeader);
+        }
+
+        for ($col = $colmin; $col <= $colmax; $col++){
+            for ($row = $rowmin; $row <= $rowmax; $row++){
+                $tilePath = tile_cache_path($this->settings, $this->zoom, $col, $row);
+                $wasMissing = isset($missingByPath[$tilePath]);
+
+                if (!file_exists($tilePath)){
+                    $http = (int)($downloadResults[$tilePath]['httpCode'] ?? 0);
+                    $this->tilesDone++;
+                    $this->emitProgress($http > 0 ? "HTTP $http (skip)" : "Tuile (skip)", $this->tilesDone, $this->tilesTotal);
+                    continue;
+                }
+
+                $fromCache = !$wasMissing;
+                $tileUrl = build_remote_tile_url($this->settings, $this->zoom, $col, $row);
 
                 $src = null;
                 try {

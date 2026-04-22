@@ -111,6 +111,27 @@ SQL);
                 }
             },
         ],
+        [
+            'version' => 3,
+            'up' => function(PDO $pdo): void {
+                $pdo->exec(<<<'SQL'
+CREATE TABLE jobs (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  settings_slug TEXT,
+  source_job_id TEXT,
+  deleted_at TEXT,
+  deleted_by_user_id INTEGER,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY(deleted_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+SQL);
+
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at DESC)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_jobs_deleted_at ON jobs(deleted_at)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_jobs_settings_slug ON jobs(settings_slug)');
+            },
+        ],
     ];
 }
-

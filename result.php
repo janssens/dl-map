@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/lib/app.php';
 require_once __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/jobs.php';
 
-app_boot_no_migrate();
-if (!is_file(app_db_path())){
-    db_migrate();
-}
+app_boot();
 $user = auth_current_user();
 if (!$user){
     http_response_code(401);
@@ -19,24 +17,12 @@ if (!$user){
 
 require_once __DIR__ . '/lib/settings.php';
 
-function jobs_root(): string {
-    return __DIR__ . '/var/jobs';
-}
-
-function job_dir(string $jobId): string {
-    return jobs_root() . '/' . $jobId;
-}
-
-function is_valid_job_id(string $jobId): bool {
-    return (bool)preg_match('/^[a-f0-9]{16,64}$/', $jobId);
-}
-
 function normalize_format(string $format): string {
     $format = strtolower(trim($format));
     if ($format === 'jpeg'){
         $format = 'jpg';
     }
-    return in_array($format, ['png', 'jpg', 'gpx', 'kmz', 'pgw', 'omap'], true) ? $format : 'png';
+    return in_array($format, ['png', 'jpg', 'gpx', 'kmz', 'omap'], true) ? $format : 'png';
 }
 
 function slugify_filename_part(string $value): string {
@@ -54,7 +40,7 @@ function slugify_filename_part(string $value): string {
 }
 
 function load_job_layer_slug(string $jobId): string {
-    $inputPath = job_dir($jobId) . '/input.json';
+    $inputPath = jobs_job_dir($jobId) . '/input.json';
     if (!is_file($inputPath)){
         return 'map';
     }
@@ -188,7 +174,7 @@ function build_4corners_gpx(int $zoom, bool $tms, array $colRange, array $rowRan
 
     $out = [];
     $out[] = '<?xml version="1.0" encoding="UTF-8"?>';
-    $out[] = '<gpx version="1.1" creator="dl-map" xmlns="http://www.topografix.com/GPX/1/1">';
+    $out[] = '<gpx version="1.1" creator="Casse dalles" xmlns="http://www.topografix.com/GPX/1/1">';
     foreach ($wpts as $w){
         $out[] = sprintf(
             '  <wpt lat="%s" lon="%s"><name>%s</name></wpt>',
@@ -234,7 +220,7 @@ function build_kml_ground_overlay(float $north, float $south, float $east, float
 }
 
 function bounds_from_meta_or_input(string $jobId): array {
-    $dir = job_dir($jobId);
+    $dir = jobs_job_dir($jobId);
 
     $metaPath = $dir . '/meta.json';
     if (is_file($metaPath)){
@@ -445,7 +431,7 @@ function decimal_year_from_iso8601(string $iso): float {
 }
 
 function compute_declination_deg_fallback(string $jobId, float $lat, float $lon): ?float {
-    $inputPath = job_dir($jobId) . '/input.json';
+    $inputPath = jobs_job_dir($jobId) . '/input.json';
     $createdAt = 'now';
     if (is_file($inputPath)){
         $raw = file_get_contents($inputPath);
@@ -474,7 +460,7 @@ function compute_declination_deg_fallback(string $jobId, float $lat, float $lon)
 }
 
 function ensure_kmz_from_png(string $jobId, string $pngPath, string $kmzPath): void {
-    $dir = job_dir($jobId);
+    $dir = jobs_job_dir($jobId);
     if (is_file($kmzPath) && filemtime($kmzPath) >= filemtime($pngPath)){
         return;
     }
@@ -503,6 +489,68 @@ function ensure_kmz_from_png(string $jobId, string $pngPath, string $kmzPath): v
     @unlink($tmp);
 }
 
+function default_omap_symbolset_path(): ?string {
+    $candidates = [];
+
+    $fromEnv = getenv('DL_MAP_OMAP_SYMBOLSET');
+    if (is_string($fromEnv) && trim($fromEnv) !== ''){
+        $candidates[] = trim($fromEnv);
+    }
+
+    // Bundled fallback (works in environments without OpenOrienteering Mapper installed).
+    $candidates[] = __DIR__ . '/assets/Course_Design_25000.omap';
+    $candidates[] = __DIR__ . '/assets/ISOM_25000.omap';
+    $candidates[] = __DIR__ . '/assets/Course_Design_15000.omap';
+    $candidates[] = __DIR__ . '/assets/ISOM_2017_15000.omap';
+
+    $candidates[] = '/usr/share/openorienteering-mapper/symbol sets/15000/ISOM 2017-2_15000.omap';
+    $candidates[] = '/usr/share/openorienteering-mapper/symbol sets/15000/Course_Design_15000.omap';
+    $candidates[] = '/usr/share/openorienteering-mapper/symbol sets/10000/ISOM 2017-2_10000.omap';
+    $candidates[] = '/usr/share/openorienteering-mapper/symbol sets/10000/Course_Design_10000.omap';
+
+    foreach ($candidates as $path){
+        if (is_file($path)){
+            return $path;
+        }
+    }
+    return null;
+}
+
+function omap_export_symbolset_path(): ?string {
+    // Explicit strategy for the OMAP export: prefer a bundled ISOM 1:25000 symbol set.
+    $bundled = __DIR__ . '/assets/Course_Design_25000.omap';
+    if (is_file($bundled)){
+        return $bundled;
+    }
+    return default_omap_symbolset_path();
+}
+
+function extract_omap_xml_section(string $omapPath, string $tagName): ?string {
+    $raw = @file_get_contents($omapPath);
+    if ($raw === false){
+        return null;
+    }
+
+    $open = '<' . $tagName;
+    $close = '</' . $tagName . '>';
+
+    $start = strpos($raw, $open);
+    if ($start === false){
+        return null;
+    }
+    $end = strpos($raw, $close, $start);
+    if ($end === false){
+        return null;
+    }
+
+    $end += strlen($close);
+    $section = substr($raw, $start, $end - $start);
+    if (!is_string($section) || trim($section) === ''){
+        return null;
+    }
+    return trim($section);
+}
+
 /**
  * @param array{zone:int,hemisphere:string,easting:float,northing:float} $utm
  * @param array{lat:float,lon:float} $center
@@ -513,10 +561,15 @@ function build_omap_xml(array $utm, array $center, array $bounds, float $declina
     $utmSpec = '+proj=utm +datum=WGS84 +zone=' . $zone . ($utm['hemisphere'] === 'S' ? ' +south' : '');
     $utmParam = $zone . ' ' . ($utm['hemisphere'] === 'S' ? 'S' : 'N');
 
+    $symbolsetPath = omap_export_symbolset_path();
+    $symbolsetRel = is_string($symbolsetPath) ? basename($symbolsetPath) : 'ISOM_25000.omap';
+
     $xml = [];
     $xml[] = '<?xml version="1.0" encoding="UTF-8"?>';
     $xml[] = '<map xmlns="http://openorienteering.org/apps/mapper/xml/v2" version="9">';
-    $xml[] = '<notes></notes>';
+    // Best-effort hint for loading/replacing the symbol set when opening the exported ZIP.
+    // (Mapper typically embeds symbols/colors in the map file, but we also ship the symbol set file next to it.)
+    $xml[] = '<notes>' . htmlspecialchars('symbolset=' . $symbolsetRel, ENT_QUOTES) . '</notes>';
     $xml[] = '<georeferencing scale="25000" grid_scale_factor="' . htmlspecialchars(fmt_float_dot($gridScaleFactor, 6), ENT_QUOTES) . '" auxiliary_scale_factor="1" declination="' . htmlspecialchars(fmt_float_dot($declinationDeg, 2), ENT_QUOTES) . '" grivation="' . htmlspecialchars(fmt_float_dot($grivationDeg, 2), ENT_QUOTES) . '">';
     $xml[] = '  <projected_crs id="UTM">';
     $xml[] = '    <spec language="PROJ.4">' . htmlspecialchars($utmSpec, ENT_QUOTES) . '</spec>';
@@ -529,13 +582,26 @@ function build_omap_xml(array $utm, array $center, array $bounds, float $declina
     $xml[] = '  </geographic_crs>';
     $xml[] = '</georeferencing>';
 
-    // Minimal color set (keeps Mapper happy, while the map is mainly the raster template).
-    $xml[] = '<colors count="2">';
-    $xml[] = '<color priority="0" name="Purple" c="0.2" m="1" y="0" k="0" opacity="1"><cmyk method="custom"/><rgb method="cmyk" r="0.8" g="0" b="1"/></color>';
-    $xml[] = '<color priority="1" name="Black" c="0" m="0" y="0" k="1" opacity="1"><cmyk method="custom"/><rgb method="cmyk" r="0" g="0" b="0"/></color>';
-    $xml[] = '</colors>';
+    // Prefer a full symbol/color library from an installed OpenOrienteering Mapper symbol set.
+    $colorsXml = null;
+    $symbolsXml = null;
+    if (is_string($symbolsetPath)){
+        $colorsXml = extract_omap_xml_section($symbolsetPath, 'colors');
+        $symbolsXml = extract_omap_xml_section($symbolsetPath, 'symbols');
+    }
 
-    $xml[] = '<symbols count="0" id="OCD"></symbols>';
+    if (is_string($colorsXml) && is_string($symbolsXml)){
+        $xml[] = $colorsXml;
+        $xml[] = $symbolsXml;
+    } else {
+        // Fallback: minimal color set (keeps Mapper happy, while the map is mainly the raster template).
+        $xml[] = '<colors count="2">';
+        $xml[] = '<color priority="0" name="Purple" c="0.2" m="1" y="0" k="0" opacity="1"><cmyk method="custom"/><rgb method="cmyk" r="0.8" g="0" b="1"/></color>';
+        $xml[] = '<color priority="1" name="Black" c="0" m="0" y="0" k="1" opacity="1"><cmyk method="custom"/><rgb method="cmyk" r="0" g="0" b="0"/></color>';
+        $xml[] = '</colors>';
+
+        $xml[] = '<symbols count="0" id="OCD"></symbols>';
+    }
     $xml[] = '<parts count="1" current="0"><part name="partie par défaut"><objects count="0"></objects></part></parts>';
 
     $xml[] = '<templates count="1" first_front_template="1">';
@@ -551,55 +617,14 @@ function build_omap_xml(array $utm, array $center, array $bounds, float $declina
     return implode("\n", $xml);
 }
 
-function build_pgw_from_bounds_and_image(array $bounds, int $width, int $height): string {
-    if ($width <= 0 || $height <= 0){
-        throw new RuntimeException('Invalid image dimensions');
-    }
-    $north = (float)($bounds['north'] ?? 0.0);
-    $south = (float)($bounds['south'] ?? 0.0);
-    $east = (float)($bounds['east'] ?? 0.0);
-    $west = (float)($bounds['west'] ?? 0.0);
-
-    if (!is_finite($north) || !is_finite($south) || !is_finite($east) || !is_finite($west)){
-        throw new RuntimeException('Invalid bounds');
-    }
-    if ($north === $south || $east === $west){
-        throw new RuntimeException('Degenerate bounds');
-    }
-
-    $pixelSizeX = ($east - $west) / (float)$width;
-    $pixelSizeY = -($north - $south) / (float)$height;
-
-    // World file uses the center of the upper-left pixel.
-    $ulCenterX = $west + ($pixelSizeX / 2.0);
-    $ulCenterY = $north + ($pixelSizeY / 2.0);
-
-    $fmt = static fn(float $v): string => rtrim(rtrim(sprintf('%.12F', $v), '0'), '.');
-
-    $lines = [
-        $fmt($pixelSizeX),
-        '0',
-        '0',
-        $fmt($pixelSizeY),
-        $fmt($ulCenterX),
-        $fmt($ulCenterY),
-        '',
-    ];
-    return implode("\n", $lines);
-}
-
 $jobId = (string)($_GET['job'] ?? '');
-if (!is_valid_job_id($jobId)){
-    http_response_code(400);
-    echo "Invalid job id";
-    exit;
-}
+jobs_require_access($jobId, $user);
 
 $format = normalize_format((string)($_GET['format'] ?? 'png'));
 $download = to_bool($_GET['download'] ?? false);
 $downloadBaseName = load_job_layer_slug($jobId);
 
-$pngPath = job_dir($jobId) . '/result.png';
+$pngPath = jobs_job_dir($jobId) . '/result.png';
 if (!is_file($pngPath)){
     http_response_code(404);
     echo "Not ready";
@@ -623,7 +648,7 @@ if ($format === 'omap'){
         $grivationDeg = utm_grid_convergence_deg((float)$center['lat'], (float)$center['lon'], $zone);
 
         $declinationDeg = 0.0;
-        $metaPath = job_dir($jobId) . '/meta.json';
+        $metaPath = jobs_job_dir($jobId) . '/meta.json';
         if (is_file($metaPath)){
             $rawMeta = file_get_contents($metaPath);
             if ($rawMeta !== false){
@@ -643,7 +668,7 @@ if ($format === 'omap'){
             }
         }
 
-        $kmzPath = job_dir($jobId) . '/map.kmz';
+        $kmzPath = jobs_job_dir($jobId) . '/map.kmz';
         ensure_kmz_from_png($jobId, $pngPath, $kmzPath);
 
         $omapXml = build_omap_xml(
@@ -661,10 +686,10 @@ if ($format === 'omap'){
         exit;
     }
 
-    $omapPath = job_dir($jobId) . '/map.omap';
+    $omapPath = jobs_job_dir($jobId) . '/map.omap';
     @file_put_contents($omapPath, $omapXml);
 
-    $zipPath = job_dir($jobId) . '/map_omap.zip';
+    $zipPath = jobs_job_dir($jobId) . '/map_omap.zip';
     $tmp = $zipPath . '.tmp.' . bin2hex(random_bytes(6));
     $zip = new ZipArchive();
     if ($zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true){
@@ -673,7 +698,11 @@ if ($format === 'omap'){
         exit;
     }
     $zip->addFile($omapPath, 'map.omap');
-    $zip->addFile(job_dir($jobId) . '/map.kmz', 'map.kmz');
+    $zip->addFile(jobs_job_dir($jobId) . '/map.kmz', 'map.kmz');
+    $symbolsetPath = omap_export_symbolset_path();
+    if (is_string($symbolsetPath) && is_file($symbolsetPath)){
+        $zip->addFile($symbolsetPath, basename($symbolsetPath));
+    }
     $zip->close();
     @rename($tmp, $zipPath);
     @unlink($tmp);
@@ -685,34 +714,8 @@ if ($format === 'omap'){
     exit;
 }
 
-if ($format === 'pgw'){
-    $pgwPath = job_dir($jobId) . '/map.pgw';
-    header('Content-Type: text/plain; charset=UTF-8');
-    header('Content-Disposition: ' . ($download ? 'attachment' : 'inline') . '; filename="' . $downloadBaseName . '.pgw"');
-    header('Cache-Control: no-store');
-
-    if (!is_file($pgwPath) || filemtime($pgwPath) < filemtime($pngPath)){
-        try {
-            $b = bounds_from_meta_or_input($jobId);
-            $info = @getimagesize($pngPath);
-            if (!is_array($info) || !isset($info[0], $info[1])){
-                throw new RuntimeException('Cannot read image size');
-            }
-            $pgw = build_pgw_from_bounds_and_image($b, (int)$info[0], (int)$info[1]);
-            @file_put_contents($pgwPath, $pgw);
-        } catch (Throwable $e){
-            http_response_code(500);
-            echo "PGW generation failed";
-            exit;
-        }
-    }
-
-    readfile($pgwPath);
-    exit;
-}
-
 if ($format === 'gpx'){
-    $gpxPath = job_dir($jobId) . '/4corners.gpx';
+    $gpxPath = jobs_job_dir($jobId) . '/4corners.gpx';
     header('Content-Type: application/gpx+xml; charset=UTF-8');
     header('Content-Disposition: ' . ($download ? 'attachment' : 'inline') . '; filename="' . $downloadBaseName . '.gpx"');
     header('Cache-Control: no-store');
@@ -722,7 +725,7 @@ if ($format === 'gpx'){
     }
 
     // Backfill on demand for older jobs.
-    $inputPath = job_dir($jobId) . '/input.json';
+    $inputPath = jobs_job_dir($jobId) . '/input.json';
     if (!is_file($inputPath)){
         http_response_code(404);
         echo "Not ready";
@@ -769,7 +772,7 @@ if ($format === 'gpx'){
 }
 
 if ($format === 'kmz'){
-    $jpgPath = job_dir($jobId) . '/result.jpg';
+    $jpgPath = jobs_job_dir($jobId) . '/result.jpg';
     try {
         ensure_jpg_from_png($pngPath, $jpgPath);
     } catch (Throwable $e){
@@ -793,7 +796,7 @@ if ($format === 'kmz'){
         exit;
     }
 
-    $kmzPath = job_dir($jobId) . '/map.kmz';
+    $kmzPath = jobs_job_dir($jobId) . '/map.kmz';
     $tmp = $kmzPath . '.tmp.' . bin2hex(random_bytes(6));
 
     $zip = new ZipArchive();
@@ -818,7 +821,7 @@ if ($format === 'kmz'){
 }
 
 if ($format === 'jpg'){
-    $jpgPath = job_dir($jobId) . '/result.jpg';
+    $jpgPath = jobs_job_dir($jobId) . '/result.jpg';
     try {
         ensure_jpg_from_png($pngPath, $jpgPath);
     } catch (Throwable $e){
