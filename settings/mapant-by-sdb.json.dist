@@ -1,0 +1,12 @@
+{
+  "layer" : "mapant-by-sdb",
+  "type" : "pmtiles",
+  "pmtiles_url" : "https://mapant-fr.s3.eu-west-par.io.cloud.ovh.net/tiles/zones/{zone}.pmtiles",
+  "file_ext": "png",
+  "tile_size" : [256,256],
+  "zoom" : 16,
+  "leaflet_min_zoom" : 10,
+  "leaflet_max_zoom" : 18,
+  "leaflet_default_zoom" : 15,
+  "style" : "normal"
+}

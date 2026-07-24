@@ -19,7 +19,7 @@ function app_session_start(): void {
 
     session_name('dlmap_sess');
     session_set_cookie_params([
-        'lifetime' => 0,
+        'lifetime' => 30 * 24 * 3600,
         'path' => '/',
         'secure' => app_is_https(),
         'httponly' => true,

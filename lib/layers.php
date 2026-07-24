@@ -23,6 +23,7 @@ function layer_access_allows(string $access, ?array $user): bool {
 
 /**
  * Returns all visible layers for a user. Some layers can be visible but not selectable (allowed=false).
+ * Includes layers from DB and from .json.dist files on disk (as fallback with access=public).
  *
  * @return array<int, array{id:int,slug:string,label:string,settings:array,access:string,owner_user_id:int|null,allowed:bool}>
  */
@@ -31,7 +32,7 @@ function layers_list_for_user(?array $user): array {
     $params = [];
     $where = [];
 
-    // Global layers.
+    // Global layers from DB.
     if (!is_array($user) || !auth_is_admin($user)){
         // Free/premium users can see public + premium layers (premium can be disabled for free users).
         $where[] = '(owner_user_id IS NULL AND access IN (\'public\', \'premium\'))';
@@ -51,6 +52,8 @@ function layers_list_for_user(?array $user): array {
     $stmt->execute($params);
 
     $out = [];
+    $dbSlugs = []; // track slugs already present in DB
+
     while ($row = $stmt->fetch()){
         $settings = json_decode((string)$row['settings_json'], true);
         if (!is_array($settings)){
@@ -63,9 +66,11 @@ function layers_list_for_user(?array $user): array {
         } else {
             $allowed = layer_access_allows((string)$row['access'], $user);
         }
+        $slug = (string)$row['slug'];
+        $dbSlugs[$slug] = true;
         $out[] = [
             'id' => (int)$row['id'],
-            'slug' => (string)$row['slug'],
+            'slug' => $slug,
             'label' => (string)$row['label'],
             'settings' => $settings,
             'access' => (string)$row['access'],
@@ -73,6 +78,34 @@ function layers_list_for_user(?array $user): array {
             'allowed' => $allowed,
         ];
     }
+
+    // Add layers from .json.dist files not yet in DB.
+    $fileSettings = list_settings();
+    foreach ($fileSettings as $fs){
+        $slug = $fs['id'];
+        if (isset($dbSlugs[$slug])){
+            continue; // already in DB
+        }
+        // Only show if file has .dist extension (default layers), not overridden .json
+        $file = (string)($fs['file'] ?? '');
+        if ($file === '' || !str_ends_with($file, '.json.dist')){
+            continue;
+        }
+        $data = json_decode(file_get_contents($file), true);
+        if (!is_array($data)){
+            continue;
+        }
+        $out[] = [
+            'id' => 0,
+            'slug' => $slug,
+            'label' => $fs['label'],
+            'settings' => $data,
+            'access' => 'public',
+            'owner_user_id' => null,
+            'allowed' => layer_access_allows('public', $user),
+        ];
+    }
+
     return $out;
 }
 
@@ -85,34 +118,43 @@ function layers_load_settings_for_user(string $slug, ?array $user): array {
         throw new RuntimeException('Invalid layer');
     }
 
+    // Try DB first.
     $stmt = db()->prepare('SELECT * FROM layers WHERE slug = ? LIMIT 1');
     $stmt->execute([$slug]);
     $row = $stmt->fetch();
-    if (!is_array($row)){
-        throw new RuntimeException('Unknown layer');
+
+    if (is_array($row)){
+        $owner = $row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null;
+        $access = (string)$row['access'];
+
+        if ($owner !== null){
+            if (!is_array($user) || (int)($user['id'] ?? 0) !== $owner){
+                throw new RuntimeException('Forbidden');
+            }
+            if ($access !== 'private' && !auth_is_admin($user)){
+                throw new RuntimeException('Forbidden');
+            }
+        } else {
+            if (!layer_access_allows($access, $user)){
+                throw new RuntimeException('Forbidden');
+            }
+        }
+
+        $settings = json_decode((string)$row['settings_json'], true);
+        if (!is_array($settings)){
+            throw new RuntimeException('Invalid layer settings');
+        }
+        $settings['_id'] = $slug;
+        return $settings;
     }
 
-    $owner = $row['owner_user_id'] !== null ? (int)$row['owner_user_id'] : null;
-    $access = (string)$row['access'];
-
-    if ($owner !== null){
-        if (!is_array($user) || (int)($user['id'] ?? 0) !== $owner){
-            throw new RuntimeException('Forbidden');
-        }
-        if ($access !== 'private' && !auth_is_admin($user)){
-            throw new RuntimeException('Forbidden');
-        }
-    } else {
-        if (!layer_access_allows($access, $user)){
-            throw new RuntimeException('Forbidden');
-        }
+    // Fallback: load from .json.dist file (public access only).
+    $settings = load_settings($slug);
+    // load_settings already normalizes the ID and returns _id
+    // Enforce public access for file-based layers.
+    if (!layer_access_allows('public', $user)){
+        throw new RuntimeException('Forbidden');
     }
-
-    $settings = json_decode((string)$row['settings_json'], true);
-    if (!is_array($settings)){
-        throw new RuntimeException('Invalid layer settings');
-    }
-    $settings['_id'] = $slug;
     return $settings;
 }
 

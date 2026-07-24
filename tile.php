@@ -7,6 +7,8 @@ require_once __DIR__ . '/lib/auth.php';
 require_once __DIR__ . '/lib/settings.php';
 require_once __DIR__ . '/lib/tiles.php';
 require_once __DIR__ . '/lib/layers.php';
+require_once __DIR__ . '/lib/crs_lambert93.php';
+require_once __DIR__ . '/lib/pmtiles.php';
 
 app_boot_no_migrate();
 if (is_file(app_db_path())){
@@ -53,17 +55,43 @@ try {
     }
     $tilePath = tile_cache_path($settings, $z, $x, $y);
     $ext = (string)($settings['file_ext'] ?? 'png');
+    $type = (string)($settings['type'] ?? '');
 
     if (!is_file($tilePath)){
-        $tileUrl = build_remote_tile_url($settings, $z, $x, $y);
-        $cookies = cookies_header_from_settings($settings);
-        $code = check200($tileUrl, $cookies);
-        if (!is_success_tile_http_code($code)){
-            http_response_code(404);
-            echo "Upstream HTTP $code";
-            exit;
+        if ($type === 'pmtiles'){
+            // Layer PMTiles : extraire la tuile via HTTP Range
+            $pmtilesUrlTemplate = (string)($settings['pmtiles_url'] ?? '');
+            if ($pmtilesUrlTemplate === ''){
+                throw new RuntimeException('Missing pmtiles_url in settings');
+            }
+
+            // Convertir z/x/y en Lambert-93 pour déterminer la zone
+            // On utilise le centre de la tuile pour la conversion
+            $tileCenter = pmtiles_tile_center_wgs84($z, $x, $y);
+            $zone = wgs84_to_pmtiles_zone($tileCenter['lat'], $tileCenter['lon']);
+
+            $pmtilesUrl = str_replace('{zone}', $zone, $pmtilesUrlTemplate);
+
+            $tileData = pmtiles_get_tile($pmtilesUrl, $z, $x, $y);
+
+            // Sauvegarder dans le cache local
+            $dir = dirname($tilePath);
+            if (!is_dir($dir)){
+                mkdir($dir, 0777, true);
+            }
+            file_put_contents($tilePath, $tileData);
+        } else {
+            // Layer standard (XYZ)
+            $tileUrl = build_remote_tile_url($settings, $z, $x, $y);
+            $cookies = cookies_header_from_settings($settings);
+            $code = check200($tileUrl, $cookies);
+            if (!is_success_tile_http_code($code)){
+                http_response_code(404);
+                echo "Upstream HTTP $code";
+                exit;
+            }
+            save_img($tilePath, $tileUrl, $cookies);
         }
-        save_img($tilePath, $tileUrl, $cookies);
     }
 
     $contentType = $ext === 'jpeg' || $ext === 'jpg' ? 'image/jpeg' : 'image/png';
